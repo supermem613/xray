@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { resolveBundledRgPath } from "./rg-path.js";
+import { planSmartSearch, type SmartLane, type SmartPlan, type SmartStrategy } from "./smart-plan.js";
 
 const DEFAULT_EXCLUDES = [
   "!**/.git/**",
@@ -24,7 +25,7 @@ export interface SearchOptions {
   max: number;
   timeoutMs: number;
   regex: boolean;
-  trackedOnly: boolean;
+  smart: boolean;
 }
 
 export interface MatchResult {
@@ -44,6 +45,8 @@ type PendingContextLine = MatchContextLine & { path: string };
 export interface SearchEnvelope {
   root: string;
   scope: string;
+  mode: "smart" | "sequential";
+  plan: SearchPlanSummary;
   regex: boolean;
   elapsedMs: number;
   timedOut: boolean;
@@ -55,6 +58,17 @@ export interface SearchEnvelope {
   command: string[];
 }
 
+export interface SearchPlanSummary {
+  strategy: SmartStrategy;
+  reason: string;
+  buckets: SearchPlanBucketSummary[];
+}
+
+export interface SearchPlanBucketSummary {
+  name: string;
+  pathCount: number | null;
+}
+
 interface RootInfo {
   root: string;
   gitRoot: string | null;
@@ -62,7 +76,6 @@ interface RootInfo {
 }
 
 interface ScopeInfo {
-  paths: string[] | null;
   label: string;
   receipt: string;
   warning: string | null;
@@ -81,6 +94,141 @@ export async function runXraySearch(opts: SearchOptions): Promise<SearchEnvelope
   const rgPath = resolveBundledRgPath() ?? "rg";
   const warnings: string[] = [];
 
+  const scope = buildScope(rootInfo);
+  const explicitScope = opts.globs.length > 0 || opts.types.length > 0;
+  const useSmart = opts.smart && !explicitScope;
+  const execution = useSmart
+    ? await runSmartSearch(rgPath, opts, rootInfo, scope)
+    : await runSequentialSearch(rgPath, opts, rootInfo, scope, explicitScope ? "explicit glob or type filter" : "requested by --no-smart");
+  const child = execution.result;
+  if (child.timedOut) {
+    warnings.push(`search stopped after ${opts.timeoutMs} ms`);
+  }
+  if (child.truncated) {
+    warnings.push(`display capped at ${opts.max} matches`);
+  }
+  if (scope.warning) {
+    warnings.push(scope.warning);
+  }
+
+  return {
+    root: rootInfo.root,
+    scope: scope.label,
+    mode: execution.mode,
+    plan: execution.plan,
+    regex: opts.regex,
+    elapsedMs: Date.now() - start,
+    timedOut: child.timedOut,
+    truncated: child.truncated,
+    matchCount: child.totalMatches,
+    fileCount: child.files.size,
+    matches: child.matches,
+    warnings,
+    command: execution.command,
+  };
+}
+
+interface SearchExecution {
+  mode: "smart" | "sequential";
+  plan: SearchPlanSummary;
+  result: RgRunResult;
+  command: string[];
+}
+
+async function runSequentialSearch(
+  rgPath: string,
+  opts: SearchOptions,
+  rootInfo: RootInfo,
+  scope: ScopeInfo,
+  reason: string,
+): Promise<SearchExecution> {
+  const baseArgs = buildBaseArgs(opts);
+  const result = await runRipgrep(rgPath, [...baseArgs, opts.query, "."], {
+    cwd: rootInfo.root,
+    timeoutMs: opts.timeoutMs,
+    maxMatches: opts.max,
+  });
+  return {
+    mode: "sequential",
+    plan: {
+      strategy: "sequential",
+      reason,
+      buckets: [{ name: "all", pathCount: null }],
+    },
+    result,
+    command: [rgPath, ...baseArgs, opts.query, scope.receipt],
+  };
+}
+
+async function runSmartSearch(
+  rgPath: string,
+  opts: SearchOptions,
+  rootInfo: RootInfo,
+  scope: ScopeInfo,
+): Promise<SearchExecution> {
+  const plan = planSmartSearch(opts.query, { regex: opts.regex });
+  if (plan.strategy === "sequential") {
+    const execution = await runSequentialSearch(rgPath, opts, rootInfo, scope, plan.reason);
+    return { ...execution, mode: "smart" };
+  }
+
+  const execution = plan.strategy === "fanout"
+    ? await runFanoutSearch(rgPath, opts, rootInfo, plan)
+    : await runNarrowedSearch(rgPath, opts, rootInfo, plan);
+
+  if (plan.fallbackOnZero && execution.result.totalMatches === 0 && !execution.result.timedOut) {
+    const fallback = await runSequentialSearch(rgPath, opts, rootInfo, scope, `${plan.reason}; narrowed search found no matches, fell back to broad search`);
+    return { ...fallback, mode: "smart" };
+  }
+
+  return execution;
+}
+
+async function runNarrowedSearch(
+  rgPath: string,
+  opts: SearchOptions,
+  rootInfo: RootInfo,
+  plan: SmartPlan,
+): Promise<SearchExecution> {
+  const lane = plan.lanes[0]!;
+  const baseArgs = buildLaneArgs(opts, lane);
+  const result = await runRipgrep(rgPath, [...baseArgs, opts.query, "."], {
+    cwd: rootInfo.root,
+    timeoutMs: opts.timeoutMs,
+    maxMatches: opts.max,
+  });
+  return {
+    mode: "smart",
+    plan: toSearchPlanSummary(plan),
+    result,
+    command: [rgPath, ...baseArgs, opts.query, "."],
+  };
+}
+
+async function runFanoutSearch(
+  rgPath: string,
+  opts: SearchOptions,
+  rootInfo: RootInfo,
+  plan: SmartPlan,
+): Promise<SearchExecution> {
+  const result = await runRipgrepFanout(rgPath, opts, rootInfo.root, plan.lanes);
+  return {
+    mode: "smart",
+    plan: toSearchPlanSummary(plan),
+    result,
+    command: [rgPath, ...buildBaseArgs(opts), opts.query, `<smart fanout: ${plan.lanes.map((lane) => lane.name).join(",")}>`],
+  };
+}
+
+function toSearchPlanSummary(plan: SmartPlan): SearchPlanSummary {
+  return {
+    strategy: plan.strategy,
+    reason: plan.reason,
+    buckets: plan.lanes.length > 0 ? plan.lanes.map((lane) => ({ name: lane.name, pathCount: null })) : [{ name: "all", pathCount: null }],
+  };
+}
+
+function buildBaseArgs(opts: SearchOptions, extraArgs: string[] = []): string[] {
   const baseArgs = [
     "--json",
     "--color", "never",
@@ -96,48 +244,22 @@ export async function runXraySearch(opts: SearchOptions): Promise<SearchEnvelope
   for (const g of DEFAULT_EXCLUDES) {
     baseArgs.push("--glob", g);
   }
+  baseArgs.push(...extraArgs);
   for (const g of opts.globs) {
     baseArgs.push("--glob", g);
   }
   for (const t of opts.types) {
     baseArgs.push("--type", t);
   }
+  return baseArgs;
+}
 
-  const scope = await buildScope(rootInfo, opts.trackedOnly);
-  const child = scope.paths
-    ? await runRipgrepPathChunks(rgPath, baseArgs, opts.query, scope.paths, {
-      cwd: rootInfo.root,
-      timeoutMs: opts.timeoutMs,
-      maxMatches: opts.max,
-    })
-    : await runRipgrep(rgPath, [...baseArgs, opts.query, "."], {
-      cwd: rootInfo.root,
-      timeoutMs: opts.timeoutMs,
-      maxMatches: opts.max,
-    });
-  if (child.timedOut) {
-    warnings.push(`search stopped after ${opts.timeoutMs} ms`);
-  }
-  if (child.truncated) {
-    warnings.push(`display capped at ${opts.max} matches; narrow the root, glob, type, or query`);
-  }
-  if (scope.warning) {
-    warnings.push(scope.warning);
-  }
+function buildLaneArgs(opts: SearchOptions, lane: SmartLane): string[] {
+  return buildBaseArgs(opts, lane.args);
+}
 
-  return {
-    root: rootInfo.root,
-    scope: scope.label,
-    regex: opts.regex,
-    elapsedMs: Date.now() - start,
-    timedOut: child.timedOut,
-    truncated: child.truncated,
-    matchCount: child.totalMatches,
-    fileCount: child.files.size,
-    matches: child.matches,
-    warnings,
-    command: [rgPath, ...baseArgs, opts.query, scope.receipt],
-  };
+function buildFanoutLaneArgs(opts: SearchOptions, lane: SmartLane): string[] {
+  return buildLaneArgs(opts, lane);
 }
 
 export async function resolveRoot(explicitRoot: string | null): Promise<RootInfo> {
@@ -165,49 +287,12 @@ async function getGitRoot(cwd: string): Promise<string | null> {
   return root ? path.resolve(root) : null;
 }
 
-async function buildScope(rootInfo: RootInfo, trackedOnly: boolean): Promise<ScopeInfo> {
-  if (!rootInfo.git || !trackedOnly) {
-    return {
-      paths: null,
-      label: rootInfo.git ? "git repo files plus untracked non-ignored files" : "non-git root",
-      receipt: ".",
-      warning: null,
-    };
-  }
-
-  const relativeRoot = path.relative(rootInfo.gitRoot!, rootInfo.root);
-  const gitArgs = ["ls-files"];
-  if (relativeRoot && !relativeRoot.startsWith("..") && !path.isAbsolute(relativeRoot)) {
-    gitArgs.push("--", normalizeGitPath(relativeRoot));
-  }
-  const files = await runCommand("git", gitArgs, {
-    cwd: rootInfo.gitRoot!,
-    timeoutMs: 5000,
-  });
-  const rels = files.stdout.split(/\r?\n/)
-    .filter(Boolean)
-    .filter((p) => !relativeRoot || isUnderRelativeRoot(p, relativeRoot))
-    .map((p) => path.relative(rootInfo.root, path.join(rootInfo.gitRoot!, p)))
-    .filter((p) => p && !p.startsWith("..") && !path.isAbsolute(p));
+function buildScope(rootInfo: RootInfo): ScopeInfo {
   return {
-    paths: rels,
-    label: `git-tracked files (${rels.length})`,
-    receipt: `<${rels.length} git-tracked files in chunks>`,
+    label: rootInfo.git ? "git repo files plus untracked non-ignored files" : "non-git root",
+    receipt: ".",
     warning: null,
   };
-}
-
-function normalizeGitPath(p: string): string {
-  return p.split(path.sep).join("/");
-}
-
-function isUnderRelativeRoot(filePath: string, relativeRoot: string): boolean {
-  if (!relativeRoot) {
-    return true;
-  }
-  const normalizedFile = normalizeGitPath(filePath);
-  const normalizedRoot = normalizeGitPath(relativeRoot).replace(/\/+$/u, "");
-  return normalizedFile === normalizedRoot || normalizedFile.startsWith(`${normalizedRoot}/`);
 }
 
 export function parseRgJson(stdout: string, maxMatches: number): RgSnapshot {
@@ -285,7 +370,12 @@ function runRipgrep(
     let pending = "";
     let timedOut = false;
     let capped = false;
+    let stopped = false;
     const finishByKilling = (reason: "timeout" | "cap") => {
+      if (stopped) {
+        return;
+      }
+      stopped = true;
       if (reason === "timeout") {
         timedOut = true;
       }
@@ -297,6 +387,9 @@ function runRipgrep(
     const timer = setTimeout(() => finishByKilling("timeout"), timeoutMs);
 
     child.stdout.on("data", (d) => {
+      if (stopped) {
+        return;
+      }
       pending += d.toString();
       const lines = pending.split(/\r?\n/);
       pending = lines.pop() ?? "";
@@ -320,7 +413,7 @@ function runRipgrep(
     });
     child.on("close", (code) => {
       clearTimeout(timer);
-      if (pending.trim()) {
+      if (!stopped && pending.trim()) {
         accumulator.consume(pending);
       }
       const exitCode = code ?? 1;
@@ -333,63 +426,132 @@ function runRipgrep(
   });
 }
 
-async function runRipgrepPathChunks(
+function runRipgrepFanout(
   command: string,
-  baseArgs: string[],
-  query: string,
-  paths: string[],
-  options: { cwd?: string; timeoutMs?: number; maxMatches?: number } = {},
+  opts: SearchOptions,
+  cwd: string,
+  lanes: SmartLane[],
 ): Promise<RgRunResult> {
-  const accumulator = createMergeAccumulator(options.maxMatches ?? 200);
-  if (paths.length === 0) {
-    return { ...accumulator.snapshot(), timedOut: false, truncated: false };
-  }
-  const chunks = chunkPaths(paths, 20000);
-  const started = Date.now();
-  for (let i = 0; i < chunks.length; i += 1) {
-    const chunk = chunks[i]!;
-    const elapsed = Date.now() - started;
-    const remaining = (options.timeoutMs ?? 5000) - elapsed;
-    if (remaining <= 0) {
-      return { ...accumulator.snapshot(), timedOut: true, truncated: accumulator.snapshot().truncated };
-    }
-    const child = await runRipgrep(command, [...baseArgs, query, ...chunk], {
-      cwd: options.cwd,
-      timeoutMs: remaining,
-      maxMatches: Math.max((options.maxMatches ?? 200) - accumulator.snapshot().matches.length, 1),
+  const laneStates = lanes.map((lane) => ({
+    lane,
+    accumulator: createMatchAccumulator(opts.max),
+    pending: "",
+    stderr: "",
+  }));
+  const children: Array<ReturnType<typeof spawn>> = [];
+  let closed = 0;
+  let timedOut = false;
+  let capped = false;
+  let stopped = false;
+
+  return new Promise((resolve, reject) => {
+    const finish = () => {
+      const merged = mergeLaneSnapshots(laneStates.map((state) => state.accumulator.snapshot()), opts.max);
+      resolve({ ...merged, timedOut, truncated: capped || merged.truncated });
+    };
+    const stopAll = (reason: "timeout" | "cap") => {
+      if (stopped) {
+        return;
+      }
+      stopped = true;
+      timedOut = reason === "timeout";
+      capped = reason === "cap";
+      for (const child of children) {
+        child.kill();
+      }
+    };
+    const timer = setTimeout(() => stopAll("timeout"), opts.timeoutMs);
+
+    lanes.forEach((lane, index) => {
+      const state = laneStates[index]!;
+      const child = spawn(command, [...buildFanoutLaneArgs(opts, lane), opts.query, "."], {
+        cwd,
+        windowsHide: true,
+        shell: false,
+      });
+      children.push(child);
+
+      child.stdout.on("data", (d) => {
+        if (stopped) {
+          return;
+        }
+        state.pending += d.toString();
+        const lines = state.pending.split(/\r?\n/);
+        state.pending = lines.pop() ?? "";
+        for (const line of lines) {
+          if (!line.trim()) {
+            continue;
+          }
+          state.accumulator.consume(line);
+          if (totalObserved(laneStates) > opts.max) {
+            stopAll("cap");
+            return;
+          }
+        }
+      });
+      child.stderr.on("data", (d) => {
+        state.stderr += d.toString();
+      });
+      child.on("error", (err) => {
+        clearTimeout(timer);
+        reject(err);
+      });
+      child.on("close", (code) => {
+        if (!stopped && state.pending.trim()) {
+          state.accumulator.consume(state.pending);
+          if (totalObserved(laneStates) > opts.max) {
+            stopAll("cap");
+          }
+        }
+        const exitCode = code ?? 1;
+        if (!stopped && exitCode !== 0 && exitCode !== 1) {
+          clearTimeout(timer);
+          stopAll("cap");
+          reject(new Error(`${command} exited ${exitCode}: ${state.stderr.trim()}`));
+          return;
+        }
+        closed += 1;
+        if (closed === lanes.length) {
+          clearTimeout(timer);
+          finish();
+        }
+      });
     });
-    accumulator.merge(child);
-    if (child.timedOut || accumulator.isAtLimit()) {
-      const omittedLaterChunks = i < chunks.length - 1 && accumulator.isAtLimit();
-      return {
-        ...accumulator.snapshot(),
-        timedOut: child.timedOut,
-        truncated: child.truncated || accumulator.snapshot().truncated || omittedLaterChunks,
-      };
-    }
-  }
-  return { ...accumulator.snapshot(), timedOut: false, truncated: accumulator.snapshot().truncated };
+  });
 }
 
-function chunkPaths(paths: string[], maxChars: number): string[][] {
-  const chunks: string[][] = [];
-  let current: string[] = [];
-  let currentChars = 0;
-  for (const p of paths) {
-    const nextChars = p.length + 1;
-    if (current.length > 0 && currentChars + nextChars > maxChars) {
-      chunks.push(current);
-      current = [];
-      currentChars = 0;
-    }
-    current.push(p);
-    currentChars += nextChars;
-  }
-  if (current.length > 0) {
-    chunks.push(current);
-  }
-  return chunks;
+function totalObserved(laneStates: Array<{ accumulator: ReturnType<typeof createMatchAccumulator> }>): number {
+  return laneStates.reduce((sum, state) => sum + state.accumulator.snapshot().totalMatches, 0);
 }
+
+function mergeLaneSnapshots(snapshots: RgSnapshot[], maxMatches: number): RgSnapshot {
+  const matches: MatchResult[] = [];
+  const files = new Set<string>();
+  const seenMatches = new Set<string>();
+  let totalMatches = 0;
+  let truncated = false;
+  for (const snapshot of snapshots) {
+    totalMatches += snapshot.totalMatches;
+    for (const file of snapshot.files) {
+      files.add(file);
+    }
+    for (const match of snapshot.matches) {
+      const key = `${match.path}\0${match.line ?? ""}\0${match.text}`;
+      if (seenMatches.has(key)) {
+        continue;
+      }
+      seenMatches.add(key);
+      if (matches.length >= maxMatches) {
+        truncated = true;
+        continue;
+      }
+      matches.push(match);
+    }
+    truncated = truncated || snapshot.truncated;
+  }
+  return { matches, files, totalMatches, truncated: truncated || totalMatches > maxMatches };
+}
+
 
 interface RgSnapshot {
   matches: MatchResult[];
@@ -480,31 +642,3 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
-function createMergeAccumulator(maxMatches: number) {
-  const matches: MatchResult[] = [];
-  const files = new Set<string>();
-  let totalMatches = 0;
-  let truncated = false;
-  return {
-    merge(result: RgSnapshot) {
-      totalMatches += result.totalMatches;
-      for (const f of result.files) {
-        files.add(f);
-      }
-      for (const m of result.matches) {
-        if (matches.length >= maxMatches) {
-          truncated = true;
-          break;
-        }
-        matches.push(m);
-      }
-      truncated = truncated || result.truncated;
-    },
-    isAtLimit() {
-      return matches.length >= maxMatches;
-    },
-    snapshot(): RgSnapshot {
-      return { matches, files, totalMatches, truncated };
-    },
-  };
-}

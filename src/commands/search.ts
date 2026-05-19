@@ -16,7 +16,7 @@ export function registerSearch(program: Command): void {
     .option("--max <n>", "Maximum matches to return.", parsePositiveInt, 200)
     .option("--timeout <ms>", "Wall-clock timeout in milliseconds.", parsePositiveInt, 5000)
     .option("--regex", "Treat query as a regular expression.", false)
-    .option("--tracked-only", "Search only git-tracked files.", false)
+    .option("--no-smart", "Force the sequential search fallback.")
     .action(async (queryParts: string[], opts: Record<string, unknown>) => {
       const result = await runXraySearch({
         query: queryParts.join(" "),
@@ -27,7 +27,7 @@ export function registerSearch(program: Command): void {
         max: Number(opts.max ?? 200),
         timeoutMs: Number(opts.timeout ?? 5000),
         regex: opts.regex === true,
-        trackedOnly: opts.trackedOnly === true,
+        smart: opts.smart !== false,
       });
 
       writeJson({ ok: true, command: "search", data: formatJsonData(result), warnings: result.warnings, timingMs: result.elapsedMs });
@@ -66,6 +66,8 @@ function formatJsonData(result: SearchEnvelope) {
       truncated: result.truncated,
       timedOut: result.timedOut,
       elapsedMs: result.elapsedMs,
+      mode: result.mode,
+      plan: result.plan,
     },
   };
 }

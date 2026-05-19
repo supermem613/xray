@@ -69,9 +69,26 @@ test("search emits compact JSON with matches and summary", () => {
   assert.equal(typeof parsed.data.summary.truncated, "boolean");
   assert.equal(typeof parsed.data.summary.timedOut, "boolean");
   assert.equal(typeof parsed.data.summary.elapsedMs, "number");
+  assert.equal(parsed.data.summary.mode, "sequential");
+  assert.equal(parsed.data.summary.plan.strategy, "sequential");
   assert.equal(parsed.data.command, undefined);
   assert.equal(parsed.data.regex, undefined);
   assert.ok(parsed.data.matches.some((match: { context?: unknown[] }) => Array.isArray(match.context) && match.context.length > 0));
+});
+
+test("search defaults to smart mode and supports --no-smart", () => {
+  const smart = runCli(["search", "xray", "--root", ".", "--max", "5"]);
+  assert.equal(smart.status, 0);
+  const smartSummary = JSON.parse(smart.stdout).data.summary;
+  assert.equal(smartSummary.mode, "smart");
+  assert.ok(["sequential", "narrowed", "fanout"].includes(smartSummary.plan.strategy));
+  assert.equal(Array.isArray(smartSummary.plan.buckets), true);
+
+  const noSmart = runCli(["search", "xray", "--root", ".", "--no-smart"]);
+  assert.equal(noSmart.status, 0);
+  const parsed = JSON.parse(noSmart.stdout);
+  assert.equal(parsed.data.summary.mode, "sequential");
+  assert.equal(parsed.data.summary.plan.reason, "requested by --no-smart");
 });
 
 test("search supports compact output with explicit zero context", () => {
