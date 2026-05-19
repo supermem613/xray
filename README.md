@@ -35,8 +35,8 @@ Rules:
 - Use --root when the target repo is not the current directory.
 - Use --glob to narrow paths instead of a separate glob/find command.
 - Use --tracked-only only when uncommitted files would confuse the result.
-- Parse JSON stdout: matches are in `data.matches`; counts, truncation,
-  timeout, and scope are in `data.summary`.
+- Parse JSON stdout: matches are in `data.matches` with `line`, `text`, and
+  `context`; counts, truncation, timeout, and scope are in `data.summary`.
 - If truncated or timed out, rerun with narrower --glob, a more specific query,
   or higher --max/--timeout.
 - Fall back to raw rg/glob only when xray cannot express the search or the user
@@ -47,8 +47,9 @@ Rules:
 
 ```powershell
 xray search <query> [options]
-xray doctor [--human]
+xray doctor
 xray schema [--summary]
+xray update
 ```
 
 Examples:
@@ -62,11 +63,13 @@ xray search "needle" --root path\to\repo
 xray doctor
 xray schema
 xray schema search --summary
+xray update
 ```
 
 Defaults:
 
 - Search is fixed-string by default. Use `--regex` for regular expressions.
+- Search includes one surrounding context line by default. Use `--context 0` for compact output.
 - Inside git repos, search includes tracked files and non-gitignored untracked files by default.
 - Use `--tracked-only` to restrict search to git-tracked files.
 - Outside git repos, search still runs with the same caps, timeouts, and excludes.
@@ -76,11 +79,11 @@ Defaults:
 ## Agent contract
 
 - Primary archetype: standard deterministic local CLI.
-- stdout: compact JSON only for non-interactive commands unless `--human` is passed.
+- stdout: compact JSON only for non-interactive commands.
 - stderr: reserved for diagnostics from the runtime or child tools.
 - `schema`: `xray schema [<command>...] [--summary]` is the command catalog.
 - `doctor`: `xray doctor` checks bundled ripgrep and git.
-- mutations: none. Search, schema, and doctor are read-only commands.
+- mutations: `update` mutates the install checkout by pulling, installing dependencies, and rebuilding. Search, schema, and doctor are read-only commands.
 - registry: `src/registry.ts` is the command catalog source for schema, examples, and help text.
 
 ## Develop

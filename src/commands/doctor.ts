@@ -16,15 +16,10 @@ export function registerDoctor(program: Command): void {
   addExamples(program
     .command("doctor")
     .description(entry.summary)
-    .option("--human", "Render human-readable output.", false)
-    .action((opts: { human?: boolean }) => {
+    .action(() => {
       const checks = runDoctorChecks();
       const ok = checks.every((c) => c.ok);
-      if (opts.human) {
-        process.stdout.write(formatHuman(checks));
-      } else {
-        writeJson({ ok, command: "doctor", data: { checks }, warnings: [], timingMs: 0 });
-      }
+      writeJson({ ok, command: "doctor", data: { checks }, warnings: [], timingMs: 0 });
       if (!ok) {
         process.exitCode = 1;
       }
@@ -53,6 +48,3 @@ export function runDoctorChecks(): CheckResult[] {
   ];
 }
 
-function formatHuman(checks: CheckResult[]): string {
-  return checks.map((c) => `${c.ok ? "ok" : "fail"} ${c.name}: ${c.detail}${c.ok ? "" : `\n  hint: ${c.hint ?? "fix the failing check"}`}`).join("\n") + "\n";
-}

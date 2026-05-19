@@ -31,7 +31,15 @@ export interface MatchResult {
   path: string;
   line: number | null;
   text: string;
+  context: MatchContextLine[];
 }
+
+export interface MatchContextLine {
+  line: number | null;
+  text: string;
+}
+
+type PendingContextLine = MatchContextLine & { path: string };
 
 export interface SearchEnvelope {
   root: string;
@@ -393,6 +401,7 @@ interface RgSnapshot {
 function createMatchAccumulator(maxMatches: number) {
   const matches: MatchResult[] = [];
   const files = new Set<string>();
+  const pendingContext: PendingContextLine[] = [];
   let totalMatches = 0;
   let truncated = false;
   return {
@@ -401,6 +410,17 @@ function createMatchAccumulator(maxMatches: number) {
       try {
         event = JSON.parse(line);
       } catch {
+        return;
+      }
+      if (event.type === "context") {
+        const contextLine = parseContextLine(event);
+        if (contextLine) {
+          pendingContext.push(contextLine);
+          const previousMatch = matches.at(-1);
+          if (previousMatch && previousMatch.path === contextLine.path) {
+            previousMatch.context.push({ line: contextLine.line, text: contextLine.text });
+          }
+        }
         return;
       }
       if (event.type !== "match") {
@@ -416,10 +436,15 @@ function createMatchAccumulator(maxMatches: number) {
         return;
       }
       const lines = event.data?.lines?.text ?? "";
+      const context = pendingContext
+        .filter((contextLine) => contextLine.path === filePath)
+        .map((contextLine) => ({ line: contextLine.line, text: contextLine.text }));
+      pendingContext.length = 0;
       matches.push({
         path: filePath,
         line: event.data?.line_number ?? null,
         text: lines.replace(/\s+/g, " ").trim(),
+        context,
       });
     },
     isOverLimit() {
@@ -429,6 +454,30 @@ function createMatchAccumulator(maxMatches: number) {
       return { matches, files, totalMatches, truncated };
     },
   };
+}
+
+function parseContextLine(event: unknown): PendingContextLine | null {
+  if (!isObject(event)) {
+    return null;
+  }
+  const data = event.data;
+  if (!isObject(data)) {
+    return null;
+  }
+  const pathData = data.path;
+  const linesData = data.lines;
+  if (!isObject(pathData) || !isObject(linesData) || typeof pathData.text !== "string" || typeof linesData.text !== "string") {
+    return null;
+  }
+  return {
+    path: pathData.text,
+    line: typeof data.line_number === "number" ? data.line_number : null,
+    text: linesData.text.replace(/\s+/g, " ").trim(),
+  };
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 function createMergeAccumulator(maxMatches: number) {

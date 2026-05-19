@@ -12,30 +12,25 @@ export function registerSearch(program: Command): void {
     .option("--root <path>", "Root path to search. Defaults to the current working directory.")
     .option("--glob <glob>", "Restrict paths with ripgrep glob patterns.", collect, [])
     .option("--type <type>", "Restrict paths with ripgrep file type filters.", collect, [])
-    .option("-C, --context <n>", "Context lines around matches.", parseNonNegativeInt, 0)
+    .option("-C, --context <n>", "Context lines around matches.", parseNonNegativeInt, 1)
     .option("--max <n>", "Maximum matches to return.", parsePositiveInt, 200)
     .option("--timeout <ms>", "Wall-clock timeout in milliseconds.", parsePositiveInt, 5000)
     .option("--regex", "Treat query as a regular expression.", false)
     .option("--tracked-only", "Search only git-tracked files.", false)
-    .option("--human", "Render human-readable output.", false)
     .action(async (queryParts: string[], opts: Record<string, unknown>) => {
       const result = await runXraySearch({
         query: queryParts.join(" "),
         root: typeof opts.root === "string" ? opts.root : null,
         globs: Array.isArray(opts.glob) ? opts.glob.map(String) : [],
         types: Array.isArray(opts.type) ? opts.type.map(String) : [],
-        context: Number(opts.context ?? 0),
+        context: Number(opts.context ?? 1),
         max: Number(opts.max ?? 200),
         timeoutMs: Number(opts.timeout ?? 5000),
         regex: opts.regex === true,
         trackedOnly: opts.trackedOnly === true,
       });
 
-      if (opts.human === true) {
-        process.stdout.write(formatHuman(result));
-      } else {
-        writeJson({ ok: true, command: "search", data: formatJsonData(result), warnings: result.warnings, timingMs: result.elapsedMs });
-      }
+      writeJson({ ok: true, command: "search", data: formatJsonData(result), warnings: result.warnings, timingMs: result.elapsedMs });
     }), entry);
 }
 
@@ -75,24 +70,3 @@ function formatJsonData(result: SearchEnvelope) {
   };
 }
 
-function formatHuman(result: SearchEnvelope): string {
-  const lines: string[] = [];
-  lines.push(`xray: ${result.matchCount} match(es) in ${result.fileCount} file(s)`);
-  lines.push(`root: ${result.root}`);
-  lines.push(`scope: ${result.scope}`);
-  lines.push(`mode: ${result.regex ? "regex" : "literal"} | truncated: ${result.truncated ? "yes" : "no"} | timed out: ${result.timedOut ? "yes" : "no"} | ${result.elapsedMs} ms`);
-  lines.push(`command: ${result.command.join(" ")}`);
-  if (result.warnings.length > 0) {
-    lines.push(`warnings: ${result.warnings.join("; ")}`);
-  }
-  if (result.matches.length === 0) {
-    lines.push("No matches.");
-    return lines.join("\n") + "\n";
-  }
-  lines.push("─".repeat(80));
-  for (const m of result.matches) {
-    const linePart = m.line === null ? "" : `:${m.line}`;
-    lines.push(`${m.path}${linePart}: ${m.text}`);
-  }
-  return lines.join("\n") + "\n";
-}

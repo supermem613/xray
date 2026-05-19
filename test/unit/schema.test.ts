@@ -3,5 +3,5 @@ import assert from "node:assert/strict";
 import { commands } from "../../src/registry.js";
 
 test("registry includes baseline commands", () => {
-  assert.deepEqual(commands.map((c) => c.path.join(" ")).sort(), ["doctor", "schema", "search"]);
+  assert.deepEqual(commands.map((c) => c.path.join(" ")).sort(), ["doctor", "schema", "search", "update"]);
 });

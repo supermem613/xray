@@ -71,4 +71,12 @@ test("search emits compact JSON with matches and summary", () => {
   assert.equal(typeof parsed.data.summary.elapsedMs, "number");
   assert.equal(parsed.data.command, undefined);
   assert.equal(parsed.data.regex, undefined);
+  assert.ok(parsed.data.matches.some((match: { context?: unknown[] }) => Array.isArray(match.context) && match.context.length > 0));
+});
+
+test("search supports compact output with explicit zero context", () => {
+  const result = runCli(["search", "Agent contract", "--root", ".", "--glob", "README.md", "--context", "0"]);
+  assert.equal(result.status, 0);
+  const parsed = JSON.parse(result.stdout);
+  assert.ok(parsed.data.matches.every((match: { context?: unknown[] }) => Array.isArray(match.context) && match.context.length === 0));
 });

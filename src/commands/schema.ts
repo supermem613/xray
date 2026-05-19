@@ -27,14 +27,14 @@ export function registerSchema(program: Command, version: string): void {
         schemaVersion: 1,
         cliVersion: version,
         envelope: {
-          stdout: "JSON only for non-interactive commands unless --human is passed",
+          stdout: "JSON only for non-interactive commands",
           stderr: "progress, diagnostics, and human narration",
           successEnvelope: ["ok", "command", "data", "warnings", "timingMs"],
           errorEnvelope: ["ok", "command", "error", "hint"],
         },
-        globalFlags: [{ name: "--human", type: "boolean", summary: "Render human-readable output when supported." }],
+        globalFlags: [],
         commands: filtered,
-        errorCodes: ["SEARCH_FAILED"],
+        errorCodes: ["SEARCH_FAILED", "UPDATE_FAILED"],
         exitCodes: [{ code: 0, meaning: "success" }, { code: 1, meaning: "error" }],
       });
     }), entry);
