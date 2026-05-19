@@ -19,35 +19,28 @@ xray search "needle" --root path\to\repo
 Add this to `CLAUDE.md`, `copilot-instructions.md`, or equivalent agent instructions:
 
 ```text
-Use xray for code search. Do not start with glob, raw rg, grep, find, or broad
-filesystem search.
+Use xray as the default replacement for code search. Do not start with glob,
+raw rg, grep, find, or broad filesystem search.
 
-Default command from the target repo:
+Commands:
   xray search "<literal query>"
-
-Default command when searching another repo:
   xray search "<literal query>" --root path\to\repo
-
-Common forms:
-  xray search "<literal query>" --glob "src/**"
   xray search "<literal query>" --root path\to\repo --glob "src/**"
   xray search "<regex>" --regex --glob "src/**"
   xray search "<literal query>" --tracked-only
 
 Rules:
-- Use xray first for code search.
 - Always include the `search` subcommand.
 - Search is literal by default. Add --regex only when regex is required.
-- Use --glob to narrow paths. Do not use a separate glob/find step first.
-- By default, xray searches git repo files plus non-gitignored untracked files.
-- Outside git repos, xray still searches with the same caps, timeouts, and excludes.
-- Use --tracked-only only when uncommitted files would be misleading.
-- Parse stdout as JSON. Read matches from `data.matches`.
-- Read count, truncation, timeout, and scope from `data.summary`.
-- If `warnings` includes truncation or timeout, rerun with a narrower --glob,
-  more specific query, or higher --max/--timeout.
-- Use raw rg or glob only when xray cannot express the query or the user asks
-  for those tools explicitly.
+- Use --root when the target repo is not the current directory.
+- Use --glob to narrow paths instead of a separate glob/find command.
+- Use --tracked-only only when uncommitted files would confuse the result.
+- Parse JSON stdout: matches are in `data.matches`; counts, truncation,
+  timeout, and scope are in `data.summary`.
+- If truncated or timed out, rerun with narrower --glob, a more specific query,
+  or higher --max/--timeout.
+- Fall back to raw rg/glob only when xray cannot express the search or the user
+  explicitly asks for those tools.
 ```
 
 ## Commands
