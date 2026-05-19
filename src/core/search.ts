@@ -24,8 +24,7 @@ export interface SearchOptions {
   max: number;
   timeoutMs: number;
   regex: boolean;
-  includeUntracked: boolean;
-  allowBroad: boolean;
+  trackedOnly: boolean;
 }
 
 export interface MatchResult {
@@ -70,7 +69,7 @@ interface CommandResult {
 
 export async function runXraySearch(opts: SearchOptions): Promise<SearchEnvelope> {
   const start = Date.now();
-  const rootInfo = await resolveRoot(opts.root, opts.allowBroad);
+  const rootInfo = await resolveRoot(opts.root);
   const rgPath = resolveBundledRgPath() ?? "rg";
   const warnings: string[] = [];
 
@@ -96,7 +95,7 @@ export async function runXraySearch(opts: SearchOptions): Promise<SearchEnvelope
     baseArgs.push("--type", t);
   }
 
-  const scope = await buildScope(rootInfo, opts.includeUntracked);
+  const scope = await buildScope(rootInfo, opts.trackedOnly);
   const child = scope.paths
     ? await runRipgrepPathChunks(rgPath, baseArgs, opts.query, scope.paths, {
       cwd: rootInfo.root,
@@ -133,7 +132,7 @@ export async function runXraySearch(opts: SearchOptions): Promise<SearchEnvelope
   };
 }
 
-export async function resolveRoot(explicitRoot: string | null, allowBroad: boolean): Promise<RootInfo> {
+export async function resolveRoot(explicitRoot: string | null): Promise<RootInfo> {
   const base = explicitRoot ? path.resolve(explicitRoot) : process.cwd();
   if (!fs.existsSync(base)) {
     throw new Error(`root does not exist: ${base}`);
@@ -141,9 +140,6 @@ export async function resolveRoot(explicitRoot: string | null, allowBroad: boole
   const gitRoot = await getGitRoot(base);
   if (gitRoot) {
     return { root: base, gitRoot, git: true };
-  }
-  if (!allowBroad) {
-    throw new Error(`not inside a git repository: ${base}. Pass --root with a repo path or --allow-broad.`);
   }
   return { root: base, gitRoot: null, git: false };
 }
@@ -161,13 +157,13 @@ async function getGitRoot(cwd: string): Promise<string | null> {
   return root ? path.resolve(root) : null;
 }
 
-async function buildScope(rootInfo: RootInfo, includeUntracked: boolean): Promise<ScopeInfo> {
-  if (!rootInfo.git || includeUntracked) {
+async function buildScope(rootInfo: RootInfo, trackedOnly: boolean): Promise<ScopeInfo> {
+  if (!rootInfo.git || !trackedOnly) {
     return {
       paths: null,
-      label: rootInfo.git ? "git root plus untracked non-ignored files" : "explicit broad root",
+      label: rootInfo.git ? "git repo files plus untracked non-ignored files" : "non-git root",
       receipt: ".",
-      warning: rootInfo.git ? "included untracked non-ignored files" : "broad root allowed explicitly",
+      warning: null,
     };
   }
 

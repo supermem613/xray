@@ -54,3 +54,21 @@ test("doctor emits the standard JSON envelope", () => {
   assert.deepEqual(parsed.warnings, []);
   assert.equal(typeof parsed.timingMs, "number");
 });
+
+test("search emits compact JSON with matches and summary", () => {
+  const result = runCli(["search", "xray", "--root", ".", "--glob", "README.md"]);
+  assert.equal(result.status, 0);
+  const parsed = JSON.parse(result.stdout);
+  assert.equal(parsed.ok, true);
+  assert.equal(parsed.command, "search");
+  assert.ok(Array.isArray(parsed.data.matches));
+  assert.equal(typeof parsed.data.summary.root, "string");
+  assert.equal(typeof parsed.data.summary.scope, "string");
+  assert.equal(typeof parsed.data.summary.matchCount, "number");
+  assert.equal(typeof parsed.data.summary.fileCount, "number");
+  assert.equal(typeof parsed.data.summary.truncated, "boolean");
+  assert.equal(typeof parsed.data.summary.timedOut, "boolean");
+  assert.equal(typeof parsed.data.summary.elapsedMs, "number");
+  assert.equal(parsed.data.command, undefined);
+  assert.equal(parsed.data.regex, undefined);
+});

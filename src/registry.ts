@@ -25,8 +25,7 @@ export const commands: CommandEntry[] = [
         { name: "--max", type: "number", summary: "Maximum matches to return.", default: 200 },
         { name: "--timeout", type: "number", summary: "Wall-clock timeout in milliseconds.", default: 5000 },
         { name: "--regex", type: "boolean", summary: "Treat query as a regular expression.", default: false },
-        { name: "--include-untracked", type: "boolean", summary: "Include non-gitignored untracked files.", default: false },
-        { name: "--allow-broad", type: "boolean", summary: "Allow searching outside a git repository.", default: false },
+        { name: "--tracked-only", type: "boolean", summary: "Search only git-tracked files.", default: false },
         { name: "--human", type: "boolean", summary: "Render human-readable output.", default: false },
       ],
     },
@@ -34,6 +33,7 @@ export const commands: CommandEntry[] = [
     examples: [
       "xray search createController",
       "xray search \"TODO.*auth\" --regex --glob \"src/**\" --context 2",
+      "xray search needle --tracked-only",
     ],
   },
   {

@@ -19,13 +19,35 @@ xray search "needle" --root path\to\repo
 Add this to `CLAUDE.md`, `copilot-instructions.md`, or equivalent agent instructions:
 
 ```text
-For code search, use `xray search <query>` instead of glob, raw `rg`, `grep`,
-or broad filesystem search. `xray` enforces git-aware scoping,
-generated-directory excludes, result caps, timeouts, and receipts. Use
-`xray search <query> --glob <pattern>` to narrow paths. Use `xray search
-<query> --regex` only when regular expressions are required. Use glob or raw
-`rg` only when `xray` cannot express the query or the user explicitly requests
-those tools.
+Use xray for code search. Do not start with glob, raw rg, grep, find, or broad
+filesystem search.
+
+Default command from the target repo:
+  xray search "<literal query>"
+
+Default command when searching another repo:
+  xray search "<literal query>" --root path\to\repo
+
+Common forms:
+  xray search "<literal query>" --glob "src/**"
+  xray search "<literal query>" --root path\to\repo --glob "src/**"
+  xray search "<regex>" --regex --glob "src/**"
+  xray search "<literal query>" --tracked-only
+
+Rules:
+- Use xray first for code search.
+- Always include the `search` subcommand.
+- Search is literal by default. Add --regex only when regex is required.
+- Use --glob to narrow paths. Do not use a separate glob/find step first.
+- By default, xray searches git repo files plus non-gitignored untracked files.
+- Outside git repos, xray still searches with the same caps, timeouts, and excludes.
+- Use --tracked-only only when uncommitted files would be misleading.
+- Parse stdout as JSON. Read matches from `data.matches`.
+- Read count, truncation, timeout, and scope from `data.summary`.
+- If `warnings` includes truncation or timeout, rerun with a narrower --glob,
+  more specific query, or higher --max/--timeout.
+- Use raw rg or glob only when xray cannot express the query or the user asks
+  for those tools explicitly.
 ```
 
 ## Commands
@@ -42,7 +64,7 @@ Examples:
 xray search "createController"
 xray search createController
 xray search "TODO.*auth" --regex --glob "src/**" --context 2
-xray search "needle" --include-untracked
+xray search needle --tracked-only
 xray search "needle" --root path\to\repo
 xray doctor
 xray schema
@@ -52,9 +74,9 @@ xray schema search --summary
 Defaults:
 
 - Search is fixed-string by default. Use `--regex` for regular expressions.
-- Inside git repos, search is restricted to git-tracked files by default.
-- Use `--include-untracked` to search non-gitignored untracked files too.
-- Outside git repos, broad searches require `--allow-broad`.
+- Inside git repos, search includes tracked files and non-gitignored untracked files by default.
+- Use `--tracked-only` to restrict search to git-tracked files.
+- Outside git repos, search still runs with the same caps, timeouts, and excludes.
 - Results are capped and timed out by default.
 - Non-interactive command stdout is JSON only.
 
