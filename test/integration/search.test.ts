@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
+import { mkdtemp, rm, writeFile, mkdir, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -79,6 +79,26 @@ test("search works outside a git repository without extra flags", async () => {
     assert.deepEqual(result.warnings, []);
   } finally {
     await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("tracked-only search handles an alias path to the git root", async () => {
+  const parent = await mkdtemp(join(tmpdir(), "xray-alias-"));
+  const workspace = join(parent, "real");
+  const alias = join(parent, "alias");
+  try {
+    await mkdir(join(workspace, "src"), { recursive: true });
+    git(workspace, ["init", "-b", "main"]);
+    await writeFile(join(workspace, "src", "tracked.txt"), "tracked needle\n", "utf8");
+    git(workspace, ["add", "src/tracked.txt"]);
+    await symlink(workspace, alias, process.platform === "win32" ? "junction" : "dir");
+
+    const result = await runXraySearch({ ...baseOptions("needle", alias), trackedOnly: true });
+    assert.equal(result.matchCount, 1);
+    assert.deepEqual(result.matches.map((m) => normalizePath(m.path)), ["src/tracked.txt"]);
+    assert.match(result.scope, /^git-tracked files/);
+  } finally {
+    await rm(parent, { recursive: true, force: true });
   }
 });
 

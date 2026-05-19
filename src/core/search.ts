@@ -57,7 +57,9 @@ export interface SearchEnvelope {
 
 interface RootInfo {
   root: string;
+  realRoot: string;
   gitRoot: string | null;
+  realGitRoot: string | null;
   git: boolean;
 }
 
@@ -145,11 +147,12 @@ export async function resolveRoot(explicitRoot: string | null): Promise<RootInfo
   if (!fs.existsSync(base)) {
     throw new Error(`root does not exist: ${base}`);
   }
+  const realRoot = fs.realpathSync.native(base);
   const gitRoot = await getGitRoot(base);
   if (gitRoot) {
-    return { root: base, gitRoot, git: true };
+    return { root: base, realRoot, gitRoot, realGitRoot: fs.realpathSync.native(gitRoot), git: true };
   }
-  return { root: base, gitRoot: null, git: false };
+  return { root: base, realRoot, gitRoot: null, realGitRoot: null, git: false };
 }
 
 async function getGitRoot(cwd: string): Promise<string | null> {
@@ -175,7 +178,7 @@ async function buildScope(rootInfo: RootInfo, trackedOnly: boolean): Promise<Sco
     };
   }
 
-  const relativeRoot = path.relative(rootInfo.gitRoot!, rootInfo.root);
+  const relativeRoot = path.relative(rootInfo.realGitRoot!, rootInfo.realRoot);
   const gitArgs = ["ls-files"];
   if (relativeRoot && !relativeRoot.startsWith("..") && !path.isAbsolute(relativeRoot)) {
     gitArgs.push("--", normalizeGitPath(relativeRoot));
@@ -187,7 +190,7 @@ async function buildScope(rootInfo: RootInfo, trackedOnly: boolean): Promise<Sco
   const rels = files.stdout.split(/\r?\n/)
     .filter(Boolean)
     .filter((p) => !relativeRoot || isUnderRelativeRoot(p, relativeRoot))
-    .map((p) => path.relative(rootInfo.root, path.join(rootInfo.gitRoot!, p)))
+    .map((p) => path.relative(rootInfo.realRoot, path.join(rootInfo.realGitRoot!, p)))
     .filter((p) => p && !p.startsWith("..") && !path.isAbsolute(p));
   return {
     paths: rels,
