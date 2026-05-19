@@ -1,10 +1,10 @@
 # xray
 
-Git-aware safe code search CLI with bundled ripgrep and agent-safe JSON output.
+Markdown+code-first search CLI with bundled ripgrep and agent-safe JSON output.
 
 `xray` is a search envelope, not a new search engine. It uses a known bundled
-`rg` from `@vscode/ripgrep`, defaults to safe git-aware scope, and returns
-receipts so agents can see what was searched.
+`rg` from `@vscode/ripgrep`, splits broad searches across markdown, code, and
+everything else, and returns receipts so agents can see what was searched.
 
 ## Quickstart
 
@@ -27,18 +27,18 @@ Commands:
   xray search "<literal query>" --root path\to\repo
   xray search "<literal query>" --root path\to\repo --glob "src/**"
   xray search "<regex>" --regex --glob "src/**"
-  xray search "<literal query>" --tracked-only
+  xray search "<literal query>" --no-smart
 
 Rules:
 - Always include the `search` subcommand.
 - Search is literal by default. Add --regex only when regex is required.
+- Default search is smart: markdown/code extension queries search one lane;
+  other literal queries fan out across markdown, code, and everything else.
+- Use --no-smart only when comparing against the explicit sequential fallback.
 - Use --root when the target repo is not the current directory.
 - Use --glob to narrow paths instead of a separate glob/find command.
-- Use --tracked-only only when uncommitted files would confuse the result.
 - Parse JSON stdout: matches are in `data.matches` with `line`, `text`, and
   `context`; counts, truncation, timeout, and scope are in `data.summary`.
-- If truncated or timed out, rerun with narrower --glob, a more specific query,
-  or higher --max/--timeout.
 - Fall back to raw rg/glob only when xray cannot express the search or the user
   explicitly asks for those tools.
 ```
@@ -58,7 +58,7 @@ Examples:
 xray search "createController"
 xray search createController
 xray search "TODO.*auth" --regex --glob "src/**" --context 2
-xray search needle --tracked-only
+xray search needle --no-smart
 xray search "needle" --root path\to\repo
 xray doctor
 xray schema
@@ -71,8 +71,9 @@ Defaults:
 - Search is fixed-string by default. Use `--regex` for regular expressions.
 - Search includes one surrounding context line by default. Use `--context 0` for compact output.
 - Inside git repos, search includes tracked files and non-gitignored untracked files by default.
-- Use `--tracked-only` to restrict search to git-tracked files.
 - Outside git repos, search still runs with the same caps, timeouts, and excludes.
+- Default literal search uses markdown/code/everything fanout unless the query has an obvious markdown or code extension.
+- `--no-smart` forces the sequential fallback.
 - Results are capped and timed out by default.
 - Non-interactive command stdout is JSON only.
 

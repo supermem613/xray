@@ -25,14 +25,14 @@ export const commands: CommandEntry[] = [
         { name: "--max", type: "number", summary: "Maximum matches to return.", default: 200 },
         { name: "--timeout", type: "number", summary: "Wall-clock timeout in milliseconds.", default: 5000 },
         { name: "--regex", type: "boolean", summary: "Treat query as a regular expression.", default: false },
-        { name: "--tracked-only", type: "boolean", summary: "Search only git-tracked files.", default: false },
+        { name: "--no-smart", type: "boolean", summary: "Force the sequential search fallback.", default: false },
       ],
     },
     output: { documented: true, schema: "SearchEnvelope" },
     examples: [
       "xray search createController",
       "xray search \"TODO.*auth\" --regex --glob \"src/**\" --context 2",
-      "xray search needle --tracked-only",
+      "xray search needle --no-smart",
     ],
   },
   {
