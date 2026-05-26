@@ -8,24 +8,30 @@ export function registerSearch(program: Command): void {
   addExamples(program
     .command("search")
     .description(entry.summary)
-    .argument("<query...>", "Search query. Literal by default.")
+    .argument("[query...]", "Search query. Literal by default.")
+    .option("--query <query>", "Search query. Use this when the query itself starts with a dash.")
     .option("--root <path>", "Root path to search. Defaults to the current working directory.")
     .option("--glob <glob>", "Restrict paths with ripgrep glob patterns.", collect, [])
     .option("--type <type>", "Restrict paths with ripgrep file type filters.", collect, [])
     .option("-C, --context <n>", "Context lines around matches.", parseNonNegativeInt, 1)
     .option("--max <n>", "Maximum matches to return.", parsePositiveInt, 200)
-    .option("--timeout <ms>", "Wall-clock timeout in milliseconds.", parsePositiveInt, 5000)
+    .option("--timeoutMs <ms>", "Wall-clock timeout in milliseconds.", parsePositiveInt, 5000)
     .option("--regex", "Treat query as a regular expression.", false)
     .option("--no-smart", "Force the sequential search fallback.")
     .action(async (queryParts: string[], opts: Record<string, unknown>) => {
+      const query = typeof opts.query === "string" ? opts.query : queryParts.join(" ");
+      if (!query) {
+        throw new Error("expected a search query");
+      }
+
       const result = await runXraySearch({
-        query: queryParts.join(" "),
+        query,
         root: typeof opts.root === "string" ? opts.root : null,
         globs: Array.isArray(opts.glob) ? opts.glob.map(String) : [],
         types: Array.isArray(opts.type) ? opts.type.map(String) : [],
         context: Number(opts.context ?? 1),
         max: Number(opts.max ?? 200),
-        timeoutMs: Number(opts.timeout ?? 5000),
+        timeoutMs: Number(opts.timeoutMs ?? 5000),
         regex: opts.regex === true,
         smart: opts.smart !== false,
       });
@@ -71,4 +77,3 @@ function formatJsonData(result: SearchEnvelope) {
     },
   };
 }
-

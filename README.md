@@ -25,8 +25,11 @@ raw rg, grep, find, or broad filesystem search.
 Commands:
   xray search "<literal query>"
   xray search "<literal query>" --root path\to\repo
+  xray search "<literal query>" --root path\to\file.log
+  xray search --query "--flag-name" --root path\to\repo
   xray search "<literal query>" --root path\to\repo --glob "src/**"
   xray search "<regex>" --regex --glob "src/**"
+  xray search "<literal query>" --timeoutMs 30000
   xray search "<literal query>" --no-smart
 
 Rules:
@@ -36,7 +39,11 @@ Rules:
   other literal queries fan out across markdown, code, and everything else.
 - Use --no-smart only when comparing against the explicit sequential fallback.
 - Use --root when the target repo is not the current directory.
+- Use --root with a file path for direct log, jsonl, or generated artifact searches.
 - Use --glob to narrow paths instead of a separate glob/find command.
+- Use --timeoutMs for wall-clock timeout in milliseconds.
+- For option-looking query literals, use --query:
+  `xray search --query "--timeoutMs" --root path\to\repo --timeoutMs 30000`.
 - Parse JSON stdout: matches are in `data.matches` with `line`, `text`, and
   `context`; counts, truncation, timeout, and scope are in `data.summary`.
 - Fall back to raw rg/glob only when xray cannot express the search or the user
@@ -58,8 +65,11 @@ Examples:
 xray search "createController"
 xray search createController
 xray search "TODO.*auth" --regex --glob "src/**" --context 2
+xray search "needle" --timeoutMs 30000
+xray search --query "--timeoutMs" --root path\to\repo --timeoutMs 30000
 xray search needle --no-smart
 xray search "needle" --root path\to\repo
+xray search "needle" --root path\to\file.log
 xray doctor
 xray schema
 xray schema search --summary

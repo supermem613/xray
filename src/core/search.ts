@@ -75,6 +75,7 @@ interface RootInfo {
   gitRoot: string | null;
   realGitRoot: string | null;
   git: boolean;
+  fileGlob: string | null;
 }
 
 interface ScopeInfo {
@@ -95,19 +96,21 @@ export async function runXraySearch(opts: SearchOptions): Promise<SearchEnvelope
   const rootInfo = await resolveRoot(opts.root);
   const rgPath = resolveBundledRgPath() ?? "rg";
   const warnings: string[] = [];
+  const searchOpts = rootInfo.fileGlob ? { ...opts, globs: [...opts.globs, rootInfo.fileGlob] } : opts;
 
   const scope = buildScope(rootInfo);
-  const explicitScope = opts.globs.length > 0 || opts.types.length > 0;
-  const useSmart = opts.smart && !explicitScope;
+  const explicitScope = searchOpts.globs.length > 0 || searchOpts.types.length > 0;
+  const useSmart = searchOpts.smart && !explicitScope;
+  const sequentialReason = rootInfo.fileGlob ? "explicit file root" : "explicit glob or type filter";
   const execution = useSmart
-    ? await runSmartSearch(rgPath, opts, rootInfo, scope)
-    : await runSequentialSearch(rgPath, opts, rootInfo, scope, explicitScope ? "explicit glob or type filter" : "requested by --no-smart");
+    ? await runSmartSearch(rgPath, searchOpts, rootInfo, scope)
+    : await runSequentialSearch(rgPath, searchOpts, rootInfo, scope, explicitScope ? sequentialReason : "requested by --no-smart");
   const child = execution.result;
   if (child.timedOut) {
-    warnings.push(`search stopped after ${opts.timeoutMs} ms`);
+    warnings.push(`search stopped after ${searchOpts.timeoutMs} ms`);
   }
   if (child.truncated) {
-    warnings.push(`display capped at ${opts.max} matches`);
+    warnings.push(`display capped at ${searchOpts.max} matches`);
   }
   if (scope.warning) {
     warnings.push(scope.warning);
@@ -145,7 +148,7 @@ async function runSequentialSearch(
   reason: string,
 ): Promise<SearchExecution> {
   const baseArgs = buildBaseArgs(opts);
-  const result = await runRipgrep(rgPath, [...baseArgs, opts.query, "."], {
+  const result = await runRipgrep(rgPath, [...baseArgs, "--", opts.query, "."], {
     cwd: rootInfo.root,
     timeoutMs: opts.timeoutMs,
     maxMatches: opts.max,
@@ -158,7 +161,7 @@ async function runSequentialSearch(
       buckets: [{ name: "all", pathCount: null }],
     },
     result,
-    command: [rgPath, ...baseArgs, opts.query, scope.receipt],
+    command: [rgPath, ...baseArgs, "--", opts.query, scope.receipt],
   };
 }
 
@@ -194,7 +197,7 @@ async function runNarrowedSearch(
 ): Promise<SearchExecution> {
   const lane = plan.lanes[0]!;
   const baseArgs = buildLaneArgs(opts, lane);
-  const result = await runRipgrep(rgPath, [...baseArgs, opts.query, "."], {
+  const result = await runRipgrep(rgPath, [...baseArgs, "--", opts.query, "."], {
     cwd: rootInfo.root,
     timeoutMs: opts.timeoutMs,
     maxMatches: opts.max,
@@ -203,7 +206,7 @@ async function runNarrowedSearch(
     mode: "smart",
     plan: toSearchPlanSummary(plan),
     result,
-    command: [rgPath, ...baseArgs, opts.query, "."],
+    command: [rgPath, ...baseArgs, "--", opts.query, "."],
   };
 }
 
@@ -218,7 +221,7 @@ async function runFanoutSearch(
     mode: "smart",
     plan: toSearchPlanSummary(plan),
     result,
-    command: [rgPath, ...buildBaseArgs(opts), opts.query, `<smart fanout: ${plan.lanes.map((lane) => lane.name).join(",")}>`],
+    command: [rgPath, ...buildBaseArgs(opts), "--", opts.query, `<smart fanout: ${plan.lanes.map((lane) => lane.name).join(",")}>`],
   };
 }
 
@@ -269,12 +272,18 @@ export async function resolveRoot(explicitRoot: string | null): Promise<RootInfo
   if (!fs.existsSync(base)) {
     throw new Error(`root does not exist: ${base}`);
   }
-  const realRoot = fs.realpathSync.native(base);
-  const gitRoot = await getGitRoot(base);
-  if (gitRoot) {
-    return { root: base, realRoot, gitRoot, realGitRoot: fs.realpathSync.native(gitRoot), git: true };
+  const stat = fs.statSync(base);
+  const searchRoot = stat.isFile() ? path.dirname(base) : base;
+  if (!stat.isFile() && !stat.isDirectory()) {
+    throw new Error(`root must be a file or directory: ${base}`);
   }
-  return { root: base, realRoot, gitRoot: null, realGitRoot: null, git: false };
+  const realRoot = fs.realpathSync.native(searchRoot);
+  const gitRoot = await getGitRoot(searchRoot);
+  const fileGlob = stat.isFile() ? path.basename(base) : null;
+  if (gitRoot) {
+    return { root: searchRoot, realRoot, gitRoot, realGitRoot: fs.realpathSync.native(gitRoot), git: true, fileGlob };
+  }
+  return { root: searchRoot, realRoot, gitRoot: null, realGitRoot: null, git: false, fileGlob };
 }
 
 async function getGitRoot(cwd: string): Promise<string | null> {
@@ -291,6 +300,14 @@ async function getGitRoot(cwd: string): Promise<string | null> {
 }
 
 function buildScope(rootInfo: RootInfo): ScopeInfo {
+  if (rootInfo.fileGlob) {
+    return {
+      label: rootInfo.git ? "single file inside git repo" : "single file",
+      receipt: rootInfo.fileGlob,
+      warning: null,
+    };
+  }
+
   return {
     label: rootInfo.git ? "git repo files plus untracked non-ignored files" : "non-git root",
     receipt: ".",
@@ -467,7 +484,7 @@ function runRipgrepFanout(
 
     lanes.forEach((lane, index) => {
       const state = laneStates[index]!;
-      const child = spawn(command, [...buildFanoutLaneArgs(opts, lane), opts.query, "."], {
+      const child = spawn(command, [...buildFanoutLaneArgs(opts, lane), "--", opts.query, "."], {
         cwd,
         windowsHide: true,
         shell: false,
@@ -644,4 +661,3 @@ function parseContextLine(event: unknown): PendingContextLine | null {
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
-

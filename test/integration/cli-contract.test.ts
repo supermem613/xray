@@ -8,12 +8,14 @@ import { commands } from "../../src/registry.js";
 const repoRoot = process.cwd();
 const cli = join(repoRoot, "src", "cli.ts");
 
-function runCli(args: string[]) {
+function runCli(args: string[], options: { allowFailure?: boolean } = {}) {
   const result = spawnSync(process.execPath, ["--import", "tsx", cli, ...args], {
     cwd: repoRoot,
     encoding: "utf8",
   });
-  assert.equal(result.stderr, "");
+  if (!options.allowFailure) {
+    assert.equal(result.stderr, "");
+  }
   return result;
 }
 
@@ -74,6 +76,23 @@ test("search emits compact JSON with matches and summary", () => {
   assert.equal(parsed.data.command, undefined);
   assert.equal(parsed.data.regex, undefined);
   assert.ok(parsed.data.matches.some((match: { context?: unknown[] }) => Array.isArray(match.context) && match.context.length > 0));
+});
+
+test("search timeout is explicit milliseconds only", () => {
+  const timeoutMs = runCli(["search", "xray", "--root", ".", "--glob", "README.md", "--timeoutMs", "30000"]);
+  assert.equal(timeoutMs.status, 0);
+  assert.deepEqual(JSON.parse(timeoutMs.stdout).warnings, []);
+
+  const timeout = runCli(["search", "xray", "--root", ".", "--glob", "README.md", "--timeout", "30000"], { allowFailure: true });
+  assert.notEqual(timeout.status, 0);
+  assert.match(timeout.stderr, /unknown option '--timeout'/u);
+});
+
+test("search supports option-looking query literals through --query", () => {
+  const result = runCli(["search", "--query", "--timeoutMs", "--root", ".", "--glob", "README.md", "--timeoutMs", "30000"]);
+  assert.equal(result.status, 0);
+  const parsed = JSON.parse(result.stdout);
+  assert.ok(parsed.data.matches.length > 0);
 });
 
 test("search defaults to smart mode and supports --no-smart", () => {

@@ -16,14 +16,15 @@ export const commands: CommandEntry[] = [
     summary: "Search code safely with git-aware scope and bundled ripgrep.",
     effect: "read",
     input: {
-      positionals: [{ name: "query", required: true, variadic: true }],
+      positionals: [{ name: "query", required: false, variadic: true }],
       flags: [
+        { name: "--query", type: "string", summary: "Search query. Use this when the query itself starts with a dash." },
         { name: "--root", type: "string", summary: "Root path to search. Defaults to the current working directory." },
         { name: "--glob", type: "string[]", summary: "Restrict paths with ripgrep glob patterns." },
         { name: "--type", type: "string[]", summary: "Restrict paths with ripgrep file type filters." },
         { name: "--context", type: "number", summary: "Context lines around matches.", default: 1 },
         { name: "--max", type: "number", summary: "Maximum matches to return.", default: 200 },
-        { name: "--timeout", type: "number", summary: "Wall-clock timeout in milliseconds.", default: 5000 },
+        { name: "--timeoutMs", type: "number", summary: "Wall-clock timeout in milliseconds.", default: 5000 },
         { name: "--regex", type: "boolean", summary: "Treat query as a regular expression.", default: false },
         { name: "--no-smart", type: "boolean", summary: "Force the sequential search fallback.", default: false },
       ],
@@ -32,6 +33,8 @@ export const commands: CommandEntry[] = [
     examples: [
       "xray search createController",
       "xray search \"TODO.*auth\" --regex --glob \"src/**\" --context 2",
+      "xray search \"needle\" --root path\\to\\file.log",
+      "xray search --query \"--timeoutMs\" --root path\\to\\repo --timeoutMs 30000",
       "xray search needle --no-smart",
     ],
   },

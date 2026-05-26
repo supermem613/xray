@@ -74,6 +74,23 @@ test("search works outside a git repository without extra flags", async () => {
   }
 });
 
+test("search accepts a file path as the root", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "xray-file-root-"));
+  try {
+    await writeFile(join(workspace, "target.log"), "needle in target\n", "utf8");
+    await writeFile(join(workspace, "other.log"), "needle outside target\n", "utf8");
+
+    const result = await runXraySearch(baseOptions("needle", join(workspace, "target.log")));
+    assert.equal(result.matchCount, 1);
+    assert.equal(normalizePath(result.matches[0]?.path ?? ""), "target.log");
+    assert.equal(result.scope, "single file");
+    assert.equal(result.mode, "sequential");
+    assert.equal(result.plan.reason, "explicit file root");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("smart search defaults to markdown code everything fanout and preserves sequential results", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "xray-smart-"));
   try {
