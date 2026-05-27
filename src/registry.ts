@@ -22,7 +22,7 @@ export const commands: CommandEntry[] = [
         { name: "--root", type: "string", summary: "Root path to search. Defaults to the current working directory." },
         { name: "--glob", type: "string[]", summary: "Restrict paths with ripgrep glob patterns." },
         { name: "--type", type: "string[]", summary: "Restrict paths with ripgrep file type filters." },
-        { name: "--context", type: "number", summary: "Context lines around matches.", default: 1 },
+        { name: "--context", type: "number", summary: "Context lines around matches.", default: 0 },
         { name: "--max", type: "number", summary: "Maximum matches to return.", default: 200 },
         { name: "--timeoutMs", type: "number", summary: "Wall-clock timeout in milliseconds.", default: 5000 },
         { name: "--regex", type: "boolean", summary: "Treat query as a regular expression.", default: false },

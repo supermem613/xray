@@ -1,7 +1,7 @@
 import { Command } from "commander";
 import { spawnSync } from "node:child_process";
 import { resolveBundledRgPath } from "../core/rg-path.js";
-import { addExamples, writeJson } from "./common.js";
+import { addExamples, writeSuccessJson } from "./common.js";
 import { getCommandEntry } from "../registry.js";
 
 interface CheckResult {
@@ -19,7 +19,7 @@ export function registerDoctor(program: Command): void {
     .action(() => {
       const checks = runDoctorChecks();
       const ok = checks.every((c) => c.ok);
-      writeJson({ ok, command: "doctor", data: { checks }, warnings: [], timingMs: 0 });
+      writeSuccessJson("doctor", { checks }, { ok });
       if (!ok) {
         process.exitCode = 1;
       }
@@ -47,4 +47,3 @@ export function runDoctorChecks(): CheckResult[] {
     },
   ];
 }
-

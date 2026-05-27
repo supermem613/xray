@@ -24,7 +24,8 @@ test("schema emits parseable JSON with every registered command", () => {
   assert.equal(result.status, 0);
   const parsed = JSON.parse(result.stdout);
   assert.deepEqual(parsed.commands.map((c: { path: string[] }) => c.path), commands.map((c) => c.path));
-  assert.deepEqual(parsed.envelope.successEnvelope, ["ok", "command", "data", "warnings", "timingMs"]);
+  assert.deepEqual(parsed.envelope.successEnvelope, ["ok", "command", "data"]);
+  assert.deepEqual(parsed.envelope.optionalSuccessFields, ["warnings"]);
 });
 
 test("schema summary supports command prefix filtering", () => {
@@ -53,35 +54,37 @@ test("doctor emits the standard JSON envelope", () => {
   assert.equal(parsed.ok, true);
   assert.equal(parsed.command, "doctor");
   assert.ok(Array.isArray(parsed.data.checks));
-  assert.deepEqual(parsed.warnings, []);
-  assert.equal(typeof parsed.timingMs, "number");
+  assert.equal(parsed.warnings, undefined);
+  assert.equal(parsed.timingMs, undefined);
 });
 
-test("search emits compact JSON with matches and summary", () => {
+test("search emits compact JSON with matches and counts", () => {
   const result = runCli(["search", "xray", "--root", ".", "--glob", "README.md"]);
   assert.equal(result.status, 0);
   const parsed = JSON.parse(result.stdout);
   assert.equal(parsed.ok, true);
   assert.equal(parsed.command, "search");
+  assert.equal(parsed.warnings, undefined);
+  assert.equal(parsed.timingMs, undefined);
   assert.ok(Array.isArray(parsed.data.matches));
-  assert.equal(typeof parsed.data.summary.root, "string");
-  assert.equal(typeof parsed.data.summary.scope, "string");
   assert.equal(typeof parsed.data.summary.matchCount, "number");
   assert.equal(typeof parsed.data.summary.fileCount, "number");
-  assert.equal(typeof parsed.data.summary.truncated, "boolean");
-  assert.equal(typeof parsed.data.summary.timedOut, "boolean");
-  assert.equal(typeof parsed.data.summary.elapsedMs, "number");
-  assert.equal(parsed.data.summary.mode, "sequential");
-  assert.equal(parsed.data.summary.plan.strategy, "sequential");
+  assert.equal(parsed.data.summary.truncated, undefined);
+  assert.equal(parsed.data.summary.timedOut, undefined);
+  assert.equal(parsed.data.summary.root, undefined);
+  assert.equal(parsed.data.summary.scope, undefined);
+  assert.equal(parsed.data.summary.mode, undefined);
+  assert.equal(parsed.data.summary.strategy, undefined);
+  assert.equal(parsed.data.summary.plan, undefined);
   assert.equal(parsed.data.command, undefined);
   assert.equal(parsed.data.regex, undefined);
-  assert.ok(parsed.data.matches.some((match: { context?: unknown[] }) => Array.isArray(match.context) && match.context.length > 0));
+  assert.ok(parsed.data.matches.every((match: { context?: unknown[] }) => match.context === undefined));
 });
 
 test("search timeout is explicit milliseconds only", () => {
   const timeoutMs = runCli(["search", "xray", "--root", ".", "--glob", "README.md", "--timeoutMs", "30000"]);
   assert.equal(timeoutMs.status, 0);
-  assert.deepEqual(JSON.parse(timeoutMs.stdout).warnings, []);
+  assert.equal(JSON.parse(timeoutMs.stdout).warnings, undefined);
 
   const timeout = runCli(["search", "xray", "--root", ".", "--glob", "README.md", "--timeout", "30000"], { allowFailure: true });
   assert.notEqual(timeout.status, 0);
@@ -95,24 +98,32 @@ test("search supports option-looking query literals through --query", () => {
   assert.ok(parsed.data.matches.length > 0);
 });
 
-test("search defaults to smart mode and supports --no-smart", () => {
+test("search supports --no-smart without exposing planner metadata", () => {
   const smart = runCli(["search", "xray", "--root", ".", "--max", "5"]);
   assert.equal(smart.status, 0);
   const smartSummary = JSON.parse(smart.stdout).data.summary;
-  assert.equal(smartSummary.mode, "smart");
-  assert.ok(["sequential", "narrowed", "fanout"].includes(smartSummary.plan.strategy));
-  assert.equal(Array.isArray(smartSummary.plan.buckets), true);
+  assert.equal(smartSummary.mode, undefined);
+  assert.equal(smartSummary.strategy, undefined);
 
   const noSmart = runCli(["search", "xray", "--root", ".", "--no-smart"]);
   assert.equal(noSmart.status, 0);
   const parsed = JSON.parse(noSmart.stdout);
-  assert.equal(parsed.data.summary.mode, "sequential");
-  assert.equal(parsed.data.summary.plan.reason, "requested by --no-smart");
+  assert.equal(parsed.data.summary.mode, undefined);
+  assert.equal(parsed.data.summary.strategy, undefined);
 });
 
-test("search supports compact output with explicit zero context", () => {
-  const result = runCli(["search", "Agent contract", "--root", ".", "--glob", "README.md", "--context", "0"]);
+test("search emits context only when requested", () => {
+  const result = runCli(["search", "Agent contract", "--root", ".", "--glob", "README.md", "--context", "1"]);
   assert.equal(result.status, 0);
   const parsed = JSON.parse(result.stdout);
-  assert.ok(parsed.data.matches.every((match: { context?: unknown[] }) => Array.isArray(match.context) && match.context.length === 0));
+  assert.ok(parsed.data.matches.some((match: { context?: unknown[] }) => Array.isArray(match.context) && match.context.length > 0));
+});
+
+test("search emits warnings only when present", () => {
+  const result = runCli(["search", "xray", "--root", ".", "--max", "1"]);
+  assert.equal(result.status, 0);
+  const parsed = JSON.parse(result.stdout);
+  assert.deepEqual(parsed.warnings, ["display capped at 1 matches"]);
+  assert.equal(parsed.data.summary.truncated, true);
+  assert.equal(parsed.data.summary.timedOut, undefined);
 });

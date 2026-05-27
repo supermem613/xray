@@ -1,6 +1,6 @@
 import { Command } from "commander";
-import { runXraySearch, type SearchEnvelope } from "../core/search.js";
-import { addExamples, writeJson } from "./common.js";
+import { runXraySearch, type MatchResult, type SearchEnvelope } from "../core/search.js";
+import { addExamples, writeSuccessJson } from "./common.js";
 import { getCommandEntry } from "../registry.js";
 
 export function registerSearch(program: Command): void {
@@ -13,7 +13,7 @@ export function registerSearch(program: Command): void {
     .option("--root <path>", "Root path to search. Defaults to the current working directory.")
     .option("--glob <glob>", "Restrict paths with ripgrep glob patterns.", collect, [])
     .option("--type <type>", "Restrict paths with ripgrep file type filters.", collect, [])
-    .option("-C, --context <n>", "Context lines around matches.", parseNonNegativeInt, 1)
+    .option("-C, --context <n>", "Context lines around matches.", parseNonNegativeInt, 0)
     .option("--max <n>", "Maximum matches to return.", parsePositiveInt, 200)
     .option("--timeoutMs <ms>", "Wall-clock timeout in milliseconds.", parsePositiveInt, 5000)
     .option("--regex", "Treat query as a regular expression.", false)
@@ -29,14 +29,14 @@ export function registerSearch(program: Command): void {
         root: typeof opts.root === "string" ? opts.root : null,
         globs: Array.isArray(opts.glob) ? opts.glob.map(String) : [],
         types: Array.isArray(opts.type) ? opts.type.map(String) : [],
-        context: Number(opts.context ?? 1),
+        context: Number(opts.context ?? 0),
         max: Number(opts.max ?? 200),
         timeoutMs: Number(opts.timeoutMs ?? 5000),
         regex: opts.regex === true,
         smart: opts.smart !== false,
       });
 
-      writeJson({ ok: true, command: "search", data: formatJsonData(result), warnings: result.warnings, timingMs: result.elapsedMs });
+      writeSuccessJson("search", formatJsonData(result), { warnings: result.warnings });
     }), entry);
 }
 
@@ -62,18 +62,35 @@ function parseNonNegativeInt(value: string): number {
 }
 
 function formatJsonData(result: SearchEnvelope) {
-  return {
-    matches: result.matches,
-    summary: {
-      root: result.root,
-      scope: result.scope,
-      matchCount: result.matchCount,
-      fileCount: result.fileCount,
-      truncated: result.truncated,
-      timedOut: result.timedOut,
-      elapsedMs: result.elapsedMs,
-      mode: result.mode,
-      plan: result.plan,
-    },
+  const summary: {
+    matchCount: number;
+    fileCount: number;
+    truncated?: boolean;
+    timedOut?: boolean;
+  } = {
+    matchCount: result.matchCount,
+    fileCount: result.fileCount,
   };
+  if (result.truncated) {
+    summary.truncated = true;
+  }
+  if (result.timedOut) {
+    summary.timedOut = true;
+  }
+  return {
+    matches: result.matches.map(formatMatch),
+    summary,
+  };
+}
+
+function formatMatch(match: MatchResult) {
+  const formatted: Omit<MatchResult, "context"> & { context?: MatchResult["context"] } = {
+    path: match.path,
+    line: match.line,
+    text: match.text,
+  };
+  if (match.context.length > 0) {
+    formatted.context = match.context;
+  }
+  return formatted;
 }

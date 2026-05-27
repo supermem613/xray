@@ -44,8 +44,9 @@ Rules:
 - Use --timeoutMs for wall-clock timeout in milliseconds.
 - For option-looking query literals, use --query:
   `xray search --query "--timeoutMs" --root path\to\repo --timeoutMs 30000`.
-- Parse JSON stdout: matches are in `data.matches` with `line`, `text`, and
-  `context`; counts, truncation, timeout, and scope are in `data.summary`.
+- Parse JSON stdout as one compact object. Matches are in `data.matches` with
+  `line`, `text`, and optional `context`; counts are in `data.summary`.
+  `truncated` and `timedOut` are present only when true.
 - Fall back to raw rg/glob only when xray cannot express the search or the user
   explicitly asks for those tools.
 ```
@@ -79,19 +80,22 @@ xray update
 Defaults:
 
 - Search is fixed-string by default. Use `--regex` for regular expressions.
-- Search includes one surrounding context line by default. Use `--context 0` for compact output.
+- Search omits surrounding context by default. Use `--context 1` or higher when nearby lines matter.
 - Inside git repos, search includes tracked files and non-gitignored untracked files by default.
 - Outside git repos, search still runs with the same caps, timeouts, and excludes.
 - Default literal search uses markdown/code/everything fanout unless the query has an obvious markdown or code extension.
 - `--no-smart` forces the sequential fallback.
-- Results are capped and timed out by default.
+- Results are capped and timed out by default. `warnings` is emitted only when
+  capped, timed out, or scoped with an important caveat.
 - Non-interactive command stdout is JSON only.
 
 ## Agent contract
 
 - Primary archetype: standard deterministic local CLI.
-- stdout: compact JSON only for non-interactive commands.
+- stdout: one compact JSON object only for non-interactive commands.
 - stderr: reserved for diagnostics from the runtime or child tools.
+- success envelope: `{ "ok": true, "command": "...", "data": ... }`, with
+  optional `warnings` only when non-empty.
 - `schema`: `xray schema [<command>...] [--summary]` is the command catalog.
 - `doctor`: `xray doctor` checks bundled ripgrep and git.
 - mutations: `update` mutates the install checkout by pulling, installing dependencies, and rebuilding. Search, schema, and doctor are read-only commands.

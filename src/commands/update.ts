@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { addExamples, writeJson } from "./common.js";
+import { addExamples, writeJson, writeSuccessJson } from "./common.js";
 import { getCommandEntry } from "../registry.js";
 
 type CommandResult = {
@@ -121,10 +121,9 @@ export async function runSelfUpdate(deps: UpdateDeps = {}): Promise<UpdateResult
 }
 
 export async function updateCommand(deps: UpdateDeps = {}): Promise<void> {
-  const started = Date.now();
   try {
     const result = await runSelfUpdate(deps);
-    writeJson({ ok: true, command: "update", data: result, warnings: [], timingMs: Date.now() - started });
+    writeSuccessJson("update", result);
   } catch (err: unknown) {
     const hint = formatError(err);
     writeJson({ ok: false, command: "update", error: "UPDATE_FAILED", hint });

@@ -29,7 +29,8 @@ export function registerSchema(program: Command, version: string): void {
         envelope: {
           stdout: "JSON only for non-interactive commands",
           stderr: "progress, diagnostics, and human narration",
-          successEnvelope: ["ok", "command", "data", "warnings", "timingMs"],
+          successEnvelope: ["ok", "command", "data"],
+          optionalSuccessFields: ["warnings"],
           errorEnvelope: ["ok", "command", "error", "hint"],
         },
         globalFlags: [],
