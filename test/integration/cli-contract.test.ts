@@ -78,6 +78,14 @@ test("search emits compact JSON with matches and counts", () => {
   assert.equal(parsed.data.summary.plan, undefined);
   assert.equal(parsed.data.command, undefined);
   assert.equal(parsed.data.regex, undefined);
+  assert.equal(parsed.data.metrics.backend, "ripgrep");
+  assert.equal(typeof parsed.data.metrics.runs, "number");
+  assert.equal(typeof parsed.data.metrics.lanes, "number");
+  assert.equal(typeof parsed.data.metrics.elapsedMs, "number");
+  assert.deepEqual(Object.keys(parsed.data.metrics.events).sort(), ["context", "fileBegin", "json", "match"]);
+  assert.equal(parsed.data.metrics.root, undefined);
+  assert.equal(parsed.data.metrics.query, undefined);
+  assert.equal(parsed.data.metrics.files, undefined);
   assert.ok(parsed.data.matches.every((match: { context?: unknown[] }) => match.context === undefined));
 });
 

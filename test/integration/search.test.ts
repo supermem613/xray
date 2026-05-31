@@ -30,6 +30,14 @@ test("search defaults to git repo files plus non-ignored untracked files", async
 
     const defaultScope = await runXraySearch(baseOptions("needle", workspace));
     assert.equal(defaultScope.matchCount, 3);
+    assert.equal(defaultScope.metrics.backend, "ripgrep");
+    assert.equal(defaultScope.metrics.runs, 3);
+    assert.equal(defaultScope.metrics.lanes, 3);
+    assert.equal(defaultScope.metrics.events.match, 3);
+    assert.equal(defaultScope.metrics.events.context, 0);
+    assert.ok(defaultScope.metrics.events.json >= defaultScope.metrics.events.match);
+    assert.equal(typeof defaultScope.metrics.elapsedMs, "number");
+    assert.ok(defaultScope.metrics.stats === undefined || typeof defaultScope.metrics.stats.searches === "number");
     assert.deepEqual(
       defaultScope.matches.map((m) => normalizePath(m.path)).sort(),
       ["other/tracked.txt", "src/tracked.txt", "src/untracked.txt"],
@@ -239,6 +247,8 @@ test("explicit glob and type filters use the sequential search path", async () =
 
     const typed = await runXraySearch({ ...baseOptions("needle", workspace), types: ["ts"] });
     assert.equal(typed.mode, "sequential");
+    assert.equal(typed.metrics.runs, 1);
+    assert.equal(typed.metrics.lanes, 1);
     assert.deepEqual(typed.matches.map((m) => normalizePath(m.path)), ["main.ts"]);
   } finally {
     await rm(workspace, { recursive: true, force: true });

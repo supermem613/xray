@@ -80,6 +80,7 @@ function formatJsonData(result: SearchEnvelope) {
   return {
     matches: result.matches.map(formatMatch),
     summary,
+    metrics: result.metrics,
   };
 }
 

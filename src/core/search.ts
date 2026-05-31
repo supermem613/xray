@@ -56,6 +56,32 @@ export interface SearchEnvelope {
   matches: MatchResult[];
   warnings: string[];
   command: string[];
+  metrics: SearchMetrics;
+}
+
+export interface SearchMetrics {
+  backend: "ripgrep";
+  runs: number;
+  lanes: number;
+  elapsedMs: number;
+  events: SearchEventMetrics;
+  stats?: SearchRgStats;
+}
+
+export interface SearchEventMetrics {
+  json: number;
+  match: number;
+  context: number;
+  fileBegin: number;
+}
+
+export interface SearchRgStats {
+  searches?: number;
+  searchesWithMatch?: number;
+  bytesSearched?: number;
+  bytesPrinted?: number;
+  matchedLines?: number;
+  matches?: number;
 }
 
 export interface SearchPlanSummary {
@@ -130,6 +156,14 @@ export async function runXraySearch(opts: SearchOptions): Promise<SearchEnvelope
     matches: child.matches,
     warnings,
     command: execution.command,
+    metrics: {
+      backend: "ripgrep",
+      runs: execution.runs,
+      lanes: execution.lanes,
+      elapsedMs: Date.now() - start,
+      events: child.metrics.events,
+      stats: child.metrics.stats,
+    },
   };
 }
 
@@ -138,6 +172,8 @@ interface SearchExecution {
   plan: SearchPlanSummary;
   result: RgRunResult;
   command: string[];
+  runs: number;
+  lanes: number;
 }
 
 async function runSequentialSearch(
@@ -162,6 +198,8 @@ async function runSequentialSearch(
     },
     result,
     command: [rgPath, ...baseArgs, "--", opts.query, scope.receipt],
+    runs: 1,
+    lanes: 1,
   };
 }
 
@@ -207,6 +245,8 @@ async function runNarrowedSearch(
     plan: toSearchPlanSummary(plan),
     result,
     command: [rgPath, ...baseArgs, "--", opts.query, "."],
+    runs: 1,
+    lanes: 1,
   };
 }
 
@@ -222,6 +262,8 @@ async function runFanoutSearch(
     plan: toSearchPlanSummary(plan),
     result,
     command: [rgPath, ...buildBaseArgs(opts), "--", opts.query, `<smart fanout: ${plan.lanes.map((lane) => lane.name).join(",")}>`],
+    runs: plan.lanes.length,
+    lanes: plan.lanes.length,
   };
 }
 
@@ -569,7 +611,7 @@ function mergeLaneSnapshots(snapshots: RgSnapshot[], maxMatches: number): RgSnap
     }
     truncated = truncated || snapshot.truncated;
   }
-  return { matches, files, totalMatches, truncated: truncated || totalMatches > maxMatches };
+  return { matches, files, totalMatches, truncated: truncated || totalMatches > maxMatches, metrics: mergeRgMetrics(snapshots) };
 }
 
 
@@ -578,12 +620,20 @@ interface RgSnapshot {
   files: Set<string>;
   totalMatches: number;
   truncated: boolean;
+  metrics: RgMetrics;
+}
+
+interface RgMetrics {
+  events: SearchEventMetrics;
+  stats?: SearchRgStats;
 }
 
 function createMatchAccumulator(maxMatches: number) {
   const matches: MatchResult[] = [];
   const files = new Set<string>();
   const pendingContext: PendingContextLine[] = [];
+  const events: SearchEventMetrics = { json: 0, match: 0, context: 0, fileBegin: 0 };
+  let stats: SearchRgStats | undefined;
   let totalMatches = 0;
   let truncated = false;
   return {
@@ -594,7 +644,13 @@ function createMatchAccumulator(maxMatches: number) {
       } catch {
         return;
       }
+      events.json += 1;
+      if (event.type === "begin") {
+        events.fileBegin += 1;
+        return;
+      }
       if (event.type === "context") {
+        events.context += 1;
         const contextLine = parseContextLine(event);
         if (contextLine) {
           pendingContext.push(contextLine);
@@ -605,9 +661,14 @@ function createMatchAccumulator(maxMatches: number) {
         }
         return;
       }
+      if (event.type === "summary") {
+        stats = parseSummaryStats(event);
+        return;
+      }
       if (event.type !== "match") {
         return;
       }
+      events.match += 1;
       totalMatches += 1;
       const filePath = event.data?.path?.text ?? "";
       if (filePath) {
@@ -633,9 +694,73 @@ function createMatchAccumulator(maxMatches: number) {
       return totalMatches > maxMatches;
     },
     snapshot(): RgSnapshot {
-      return { matches, files, totalMatches, truncated };
+      return { matches, files, totalMatches, truncated, metrics: { events: { ...events }, stats } };
     },
   };
+}
+
+function mergeRgMetrics(snapshots: RgSnapshot[]): RgMetrics {
+  const events: SearchEventMetrics = { json: 0, match: 0, context: 0, fileBegin: 0 };
+  let stats: SearchRgStats | undefined;
+  for (const snapshot of snapshots) {
+    events.json += snapshot.metrics.events.json;
+    events.match += snapshot.metrics.events.match;
+    events.context += snapshot.metrics.events.context;
+    events.fileBegin += snapshot.metrics.events.fileBegin;
+    stats = mergeRgStats(stats, snapshot.metrics.stats);
+  }
+  return { events, stats };
+}
+
+function mergeRgStats(left: SearchRgStats | undefined, right: SearchRgStats | undefined): SearchRgStats | undefined {
+  if (!left) {
+    return right ? { ...right } : undefined;
+  }
+  if (!right) {
+    return left;
+  }
+  return {
+    searches: addOptional(left.searches, right.searches),
+    searchesWithMatch: addOptional(left.searchesWithMatch, right.searchesWithMatch),
+    bytesSearched: addOptional(left.bytesSearched, right.bytesSearched),
+    bytesPrinted: addOptional(left.bytesPrinted, right.bytesPrinted),
+    matchedLines: addOptional(left.matchedLines, right.matchedLines),
+    matches: addOptional(left.matches, right.matches),
+  };
+}
+
+function addOptional(left: number | undefined, right: number | undefined): number | undefined {
+  if (left === undefined) {
+    return right;
+  }
+  if (right === undefined) {
+    return left;
+  }
+  return left + right;
+}
+
+function parseSummaryStats(event: unknown): SearchRgStats | undefined {
+  if (!isObject(event) || !isObject(event.data) || !isObject(event.data.stats)) {
+    return undefined;
+  }
+  const stats = event.data.stats;
+  return omitUndefined({
+    searches: numberField(stats.searches),
+    searchesWithMatch: numberField(stats.searches_with_match),
+    bytesSearched: numberField(stats.bytes_searched),
+    bytesPrinted: numberField(stats.bytes_printed),
+    matchedLines: numberField(stats.matched_lines),
+    matches: numberField(stats.matches),
+  });
+}
+
+function numberField(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function omitUndefined<T extends Record<string, number | undefined>>(value: T): T | undefined {
+  const entries = Object.entries(value).filter(([, entryValue]) => entryValue !== undefined);
+  return entries.length > 0 ? Object.fromEntries(entries) as T : undefined;
 }
 
 function parseContextLine(event: unknown): PendingContextLine | null {
