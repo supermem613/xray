@@ -4,7 +4,7 @@ import path from "node:path";
 import { resolveBundledRgPath } from "./rg-path.js";
 import { planSmartSearch, type SmartLane, type SmartPlan, type SmartStrategy } from "./smart-plan.js";
 
-const DEFAULT_EXCLUDES = [
+export const DEFAULT_EXCLUDES = [
   "!**/.git/**",
   "!**/node_modules/**",
   "!**/.copilot/**",
@@ -26,6 +26,7 @@ export interface SearchOptions {
   timeoutMs: number;
   regex: boolean;
   smart: boolean;
+  all?: boolean;
 }
 
 export interface MatchResult {
@@ -288,8 +289,12 @@ function buildBaseArgs(opts: SearchOptions, extraArgs: string[] = []): string[] 
   if (opts.context > 0) {
     baseArgs.push("-C", String(opts.context));
   }
-  for (const g of DEFAULT_EXCLUDES) {
-    baseArgs.push("--glob", g);
+  if (opts.all) {
+    baseArgs.push("--hidden", "--no-ignore");
+  } else {
+    for (const g of DEFAULT_EXCLUDES) {
+      baseArgs.push("--glob", g);
+    }
   }
   baseArgs.push(...extraArgs);
   for (const g of opts.globs) {
