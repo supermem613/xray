@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { writeJson } from "./commands/common.js";
 import { registerDoctor } from "./commands/doctor.js";
 import { registerSchema } from "./commands/schema.js";
+import { registerFiles } from "./commands/files.js";
 import { registerSearch } from "./commands/search.js";
 import { registerUpdate } from "./commands/update.js";
 
@@ -21,6 +22,7 @@ program
   .version(VERSION);
 
 registerSearch(program);
+registerFiles(program);
 registerDoctor(program);
 registerSchema(program, VERSION);
 registerUpdate(program);
@@ -33,10 +35,11 @@ if (process.argv.slice(2).length === 0) {
 
 program.parseAsync().catch((err) => {
   const msg = err instanceof Error ? err.message : String(err);
+  const isFiles = process.argv[2] === "files";
   writeJson({
     ok: false,
-    command: "xray",
-    error: "SEARCH_FAILED",
+    command: isFiles ? "files" : "xray",
+    error: isFiles ? "FILES_FAILED" : "SEARCH_FAILED",
     hint: msg,
   });
   process.exit(1);

@@ -55,6 +55,7 @@ Rules:
 
 ```powershell
 xray search <query> [options]
+xray files <query> [options]
 xray doctor
 xray schema [--summary]
 xray update
@@ -69,8 +70,12 @@ xray search "TODO.*auth" --regex --glob "src/**" --context 2
 xray search "needle" --timeoutMs 30000
 xray search --query "--timeoutMs" --root path\to\repo --timeoutMs 30000
 xray search needle --no-smart
+xray search needle --all
 xray search "needle" --root path\to\repo
 xray search "needle" --root path\to\file.log
+xray files --root path\to\repo
+xray files needle --glob "src/**"
+xray files --root path\to\repo --all
 xray doctor
 xray schema
 xray schema search --summary
@@ -88,6 +93,26 @@ Defaults:
 - Results are capped and timed out by default. `warnings` is emitted only when
   capped, timed out, or scoped with an important caveat.
 - Non-interactive command stdout is JSON only.
+
+## File listing
+
+`xray files` lists file paths instead of content matches, for path discovery.
+With no query it lists every file in scope (ripgrep `--files`); with a query it
+lists only files that contain it (ripgrep `--files-with-matches`).
+
+- `files` lists all files, with no binary/text distinction.
+- Symlinked directories are not followed.
+- Results use ripgrep's native traversal order and are not sorted.
+- `--max` bounds the number of files (default 1000), not lines. `truncated` is
+  reported when the cap is hit.
+- `data.matches` holds `{ path }` objects; `data.summary.fileCount` is the count.
+
+### --all scope override
+
+Both `search` and `files` accept `--all`, which removes every exclusion: hidden
+files, gitignored files, and the built-in vendor/build excludes (`.git`,
+`node_modules`, `dist`, and similar). Without `--all`, both commands skip hidden
+files, respect `.gitignore`, and apply the built-in excludes.
 
 ## Agent contract
 

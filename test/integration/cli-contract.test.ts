@@ -135,3 +135,53 @@ test("search emits warnings only when present", () => {
   assert.equal(parsed.data.summary.truncated, true);
   assert.equal(parsed.data.summary.timedOut, undefined);
 });
+
+test("files emits compact JSON with path-only matches and fileCount", () => {
+  const result = runCli(["files", "--root", ".", "--glob", "README.md"]);
+  assert.equal(result.status, 0);
+  const parsed = JSON.parse(result.stdout);
+  assert.equal(parsed.ok, true);
+  assert.equal(parsed.command, "files");
+  assert.equal(parsed.warnings, undefined);
+  assert.equal(parsed.timingMs, undefined);
+  assert.ok(Array.isArray(parsed.data.matches));
+  assert.ok(parsed.data.matches.length >= 1);
+  assert.ok(parsed.data.matches.every((match: Record<string, unknown>) => typeof match.path === "string" && Object.keys(match).length === 1));
+  assert.equal(typeof parsed.data.summary.fileCount, "number");
+  assert.equal(parsed.data.summary.matchCount, undefined);
+  assert.equal(parsed.data.summary.truncated, undefined);
+  assert.equal(parsed.data.summary.timedOut, undefined);
+  assert.equal(parsed.data.summary.scope, undefined);
+  assert.equal(parsed.data.metrics.backend, "ripgrep");
+  assert.equal(typeof parsed.data.metrics.runs, "number");
+  assert.equal(typeof parsed.data.metrics.lanes, "number");
+  assert.equal(typeof parsed.data.metrics.elapsedMs, "number");
+  assert.equal(parsed.data.metrics.events, undefined);
+  assert.equal(parsed.data.metrics.stats, undefined);
+});
+
+test("files caps file results with --max and reports truncation", () => {
+  const result = runCli(["files", "--root", ".", "--max", "1"]);
+  assert.equal(result.status, 0);
+  const parsed = JSON.parse(result.stdout);
+  assert.equal(parsed.data.matches.length, 1);
+  assert.equal(parsed.data.summary.fileCount, 1);
+  assert.equal(parsed.data.summary.truncated, true);
+  assert.deepEqual(parsed.warnings, ["display capped at 1 files"]);
+});
+
+test("files and search both accept the --all scope override", () => {
+  const files = runCli(["files", "--root", ".", "--all", "--max", "5"]);
+  assert.equal(files.status, 0);
+  assert.equal(JSON.parse(files.stdout).command, "files");
+
+  const search = runCli(["search", "xray", "--root", ".", "--all", "--glob", "README.md"]);
+  assert.equal(search.status, 0);
+  assert.equal(JSON.parse(search.stdout).ok, true);
+});
+
+test("schema lists the FILES_FAILED error code", () => {
+  const result = runCli(["schema"]);
+  assert.equal(result.status, 0);
+  assert.ok(JSON.parse(result.stdout).errorCodes.includes("FILES_FAILED"));
+});

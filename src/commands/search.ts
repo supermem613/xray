@@ -18,6 +18,7 @@ export function registerSearch(program: Command): void {
     .option("--timeoutMs <ms>", "Wall-clock timeout in milliseconds.", parsePositiveInt, 5000)
     .option("--regex", "Treat query as a regular expression.", false)
     .option("--no-smart", "Force the sequential search fallback.")
+    .option("--all", "Remove all exclusions: include hidden, gitignored, and normally-excluded files.", false)
     .action(async (queryParts: string[], opts: Record<string, unknown>) => {
       const query = typeof opts.query === "string" ? opts.query : queryParts.join(" ");
       if (!query) {
@@ -34,6 +35,7 @@ export function registerSearch(program: Command): void {
         timeoutMs: Number(opts.timeoutMs ?? 5000),
         regex: opts.regex === true,
         smart: opts.smart !== false,
+        all: opts.all === true,
       });
 
       writeSuccessJson("search", formatJsonData(result), { warnings: result.warnings });

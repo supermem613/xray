@@ -35,7 +35,7 @@ export function registerSchema(program: Command, version: string): void {
         },
         globalFlags: [],
         commands: filtered,
-        errorCodes: ["SEARCH_FAILED", "UPDATE_FAILED"],
+        errorCodes: ["SEARCH_FAILED", "FILES_FAILED", "UPDATE_FAILED"],
         exitCodes: [{ code: 0, meaning: "success" }, { code: 1, meaning: "error" }],
       });
     }), entry);
