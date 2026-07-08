@@ -142,6 +142,7 @@ export async function runXraySearch(opts: SearchOptions): Promise<SearchEnvelope
   if (scope.warning) {
     warnings.push(scope.warning);
   }
+  warnings.push(...child.warnings);
 
   return {
     root: rootInfo.root,
@@ -222,7 +223,7 @@ async function runSmartSearch(
 
   if (plan.fallbackOnZero && execution.result.totalMatches === 0 && !execution.result.timedOut) {
     const fallback = await runSequentialSearch(rgPath, opts, rootInfo, scope, `${plan.reason}; narrowed search found no matches, fell back to broad search`);
-    return { ...fallback, mode: "smart" };
+    return { ...fallback, mode: "smart", result: { ...fallback.result, warnings: [...execution.result.warnings, ...fallback.result.warnings] } };
   }
 
   return execution;
@@ -417,6 +418,7 @@ function runCommand(
 
 interface RgRunResult extends RgSnapshot {
   timedOut: boolean;
+  warnings: string[];
 }
 
 function runRipgrep(
@@ -485,10 +487,17 @@ function runRipgrep(
       }
       const exitCode = code ?? 1;
       if (!timedOut && !capped && exitCode !== 0 && exitCode !== 1) {
+        const warning = exitCode === 2 ? recoverableRipgrepWarning(stderr) : null;
+        if (warning) {
+          const snapshot = accumulator.snapshot();
+          resolve({ ...snapshot, timedOut, truncated: snapshot.truncated, warnings: [warning] });
+          return;
+        }
         reject(new Error(`${command} exited ${exitCode}: ${stderr.trim()}`));
         return;
       }
-      resolve({ ...accumulator.snapshot(), timedOut, truncated: capped || accumulator.snapshot().truncated });
+      const snapshot = accumulator.snapshot();
+      resolve({ ...snapshot, timedOut, truncated: capped || snapshot.truncated, warnings: [] });
     });
   });
 }
@@ -504,6 +513,7 @@ function runRipgrepFanout(
     accumulator: createMatchAccumulator(opts.max),
     pending: "",
     stderr: "",
+    warnings: [] as string[],
   }));
   const children: Array<ReturnType<typeof spawn>> = [];
   let closed = 0;
@@ -514,7 +524,7 @@ function runRipgrepFanout(
   return new Promise((resolve, reject) => {
     const finish = () => {
       const merged = mergeLaneSnapshots(laneStates.map((state) => state.accumulator.snapshot()), opts.max);
-      resolve({ ...merged, timedOut, truncated: capped || merged.truncated });
+      resolve({ ...merged, timedOut, truncated: capped || merged.truncated, warnings: laneStates.flatMap((state) => state.warnings) });
     };
     const stopAll = (reason: "timeout" | "cap") => {
       if (stopped) {
@@ -572,6 +582,16 @@ function runRipgrepFanout(
         }
         const exitCode = code ?? 1;
         if (!stopped && exitCode !== 0 && exitCode !== 1) {
+          const warning = exitCode === 2 ? recoverableRipgrepWarning(state.stderr) : null;
+          if (warning) {
+            state.warnings.push(warning);
+            closed += 1;
+            if (closed === lanes.length) {
+              clearTimeout(timer);
+              finish();
+            }
+            return;
+          }
           clearTimeout(timer);
           stopAll("cap");
           reject(new Error(`${command} exited ${exitCode}: ${state.stderr.trim()}`));
@@ -585,6 +605,18 @@ function runRipgrepFanout(
       });
     });
   });
+}
+
+function recoverableRipgrepWarning(stderr: string): string | null {
+  const lines = stderr.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  if (lines.length === 0 || !lines.every(isRecoverableRipgrepFileError)) {
+    return null;
+  }
+  return `ripgrep reported recoverable search errors: ${lines.join("\n")}`;
+}
+
+function isRecoverableRipgrepFileError(line: string): boolean {
+  return /^rg: .+: .+\(os error \d+\)$/u.test(line);
 }
 
 function totalObserved(laneStates: Array<{ accumulator: ReturnType<typeof createMatchAccumulator> }>): number {
