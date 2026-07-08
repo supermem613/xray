@@ -47,8 +47,9 @@ Rules:
 - Parse JSON stdout as one compact object. Matches are in `data.matches` with
   `line`, `text`, and optional `context`; counts are in `data.summary`.
   `truncated` and `timedOut` are present only when true.
-- Fall back to raw rg/glob only when xray cannot express the search or the user
-  explicitly asks for those tools.
+- Recoverable ripgrep file errors return parsed partial results with `warnings`
+  while stdout remains one compact JSON object.
+- If xray cannot express the search, stop and report the unsupported shape.
 ```
 
 ## Commands
@@ -121,6 +122,8 @@ files, respect `.gitignore`, and apply the built-in excludes.
 - stderr: reserved for diagnostics from the runtime or child tools.
 - success envelope: `{ "ok": true, "command": "...", "data": ... }`, with
   optional `warnings` only when non-empty.
+- recoverable ripgrep file errors: parsed partial results are returned with
+  `warnings`; nonrecoverable ripgrep failures still fail loudly.
 - `schema`: `xray schema [<command>...] [--summary]` is the command catalog.
 - `doctor`: `xray doctor` checks bundled ripgrep and git.
 - mutations: `update` mutates the install checkout by pulling, installing dependencies, and rebuilding. Search, schema, and doctor are read-only commands.
